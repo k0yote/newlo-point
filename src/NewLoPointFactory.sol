@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {Create2}                         from "@openzeppelin/contracts/utils/Create2.sol";
-import {TransparentUpgradeableProxy}    from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
-import {ProxyAdmin}                     from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import {NewLoPoint}                     from "./NewLoPoint.sol";
+import { Create2 } from "@openzeppelin/contracts/utils/Create2.sol";
+import { TransparentUpgradeableProxy } from
+    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import { NewLoPoint } from "./NewLoPoint.sol";
 
 contract NewLoPointFactory {
     address public immutable implementation;
@@ -17,18 +18,12 @@ contract NewLoPointFactory {
         proxyAdmin = new ProxyAdmin(msg.sender);
     }
 
-    function deployToken(
-        bytes32 salt,
-        address admin,
-        address pauser,
-        address minter
-    ) external returns (address proxy) {
-        bytes memory initData = abi.encodeWithSelector(
-            NewLoPoint.initialize.selector,
-            admin,
-            pauser,
-            minter
-        );
+    function deployToken(bytes32 salt, address admin, address pauser, address minter)
+        external
+        returns (address proxy)
+    {
+        bytes memory initData =
+            abi.encodeWithSelector(NewLoPoint.initialize.selector, admin, pauser, minter);
 
         bytes memory proxyBytecode = abi.encodePacked(
             type(TransparentUpgradeableProxy).creationCode,
@@ -39,18 +34,13 @@ contract NewLoPointFactory {
         emit TokenDeployed(proxy, salt);
     }
 
-    function predictAddress(
-        bytes32 salt,
-        address admin,
-        address pauser,
-        address minter
-    ) external view returns (address predicted) {
-        bytes memory initData = abi.encodeWithSelector(
-            NewLoPoint.initialize.selector,
-            admin,
-            pauser,
-            minter
-        );
+    function predictAddress(bytes32 salt, address admin, address pauser, address minter)
+        external
+        view
+        returns (address predicted)
+    {
+        bytes memory initData =
+            abi.encodeWithSelector(NewLoPoint.initialize.selector, admin, pauser, minter);
 
         bytes memory proxyBytecode = abi.encodePacked(
             type(TransparentUpgradeableProxy).creationCode,

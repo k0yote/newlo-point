@@ -2,9 +2,10 @@
 pragma solidity ^0.8.27;
 
 import "forge-std/Test.sol";
-import {NewLoPoint} from "../src/NewLoPoint.sol";
-import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { NewLoPoint } from "../src/NewLoPoint.sol";
+import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import { TransparentUpgradeableProxy } from
+    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract NewLoPointTest is Test {
     NewLoPoint impl;
@@ -13,22 +14,18 @@ contract NewLoPointTest is Test {
     TransparentUpgradeableProxy proxy;
 
     address constant DEFAULT_ADMIN = address(0x1);
-    address constant PAUSER        = address(0x2);
-    address constant MINTER        = address(0x3);
-    address constant USER_A        = address(0x4);
-    address constant USER_B        = address(0x5);
-    address constant EXCHANGE      = address(0x6);
+    address constant PAUSER = address(0x2);
+    address constant MINTER = address(0x3);
+    address constant USER_A = address(0x4);
+    address constant USER_B = address(0x5);
+    address constant EXCHANGE = address(0x6);
 
     function setUp() public {
-        impl  = new NewLoPoint();
+        impl = new NewLoPoint();
         admin = new ProxyAdmin(DEFAULT_ADMIN);
 
-        bytes memory data = abi.encodeWithSelector(
-            impl.initialize.selector,
-            DEFAULT_ADMIN,
-            PAUSER,
-            MINTER
-        );
+        bytes memory data =
+            abi.encodeWithSelector(impl.initialize.selector, DEFAULT_ADMIN, PAUSER, MINTER);
         proxy = new TransparentUpgradeableProxy(address(impl), address(admin), data);
         token = NewLoPoint(address(proxy));
     }
@@ -51,7 +48,7 @@ contract NewLoPointTest is Test {
         // イベントの確認
         vm.expectEmit(true, true, true, true);
         emit NewLoPoint.TransfersEnabledChanged(true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setTransfersEnabled(true);
 
@@ -69,7 +66,7 @@ contract NewLoPointTest is Test {
         // ホワイトリストモードを有効化
         vm.expectEmit(true, true, true, true);
         emit NewLoPoint.WhitelistModeChanged(true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistModeEnabled(true);
 
@@ -78,7 +75,7 @@ contract NewLoPointTest is Test {
         // 交換所をホワイトリストに追加
         vm.expectEmit(true, true, true, true);
         emit NewLoPoint.AddressWhitelisted(EXCHANGE, true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistedAddress(EXCHANGE, true);
 
@@ -117,7 +114,7 @@ contract NewLoPointTest is Test {
         emit NewLoPoint.AddressWhitelisted(EXCHANGE, true);
         vm.expectEmit(true, true, true, true);
         emit NewLoPoint.AddressWhitelisted(USER_A, true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistedAddresses(addresses, true);
 
@@ -129,7 +126,7 @@ contract NewLoPointTest is Test {
         // 転送無効、ホワイトリストモード有効
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistModeEnabled(true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistedAddress(USER_A, true);
 
@@ -146,7 +143,7 @@ contract NewLoPointTest is Test {
         // ホワイトリストモード有効、但し全転送も有効
         vm.prank(DEFAULT_ADMIN);
         token.setWhitelistModeEnabled(true);
-        
+
         vm.prank(DEFAULT_ADMIN);
         token.setTransfersEnabled(true);
 

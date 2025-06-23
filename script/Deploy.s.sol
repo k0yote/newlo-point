@@ -2,14 +2,15 @@
 pragma solidity ^0.8.27;
 
 import "forge-std/Script.sol";
-import {NewLoPoint} from "../src/NewLoPoint.sol";
-import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { NewLoPoint } from "../src/NewLoPoint.sol";
+import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import { TransparentUpgradeableProxy } from
+    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract Deploy is Script {
     function run() external {
-        uint256 pk     = vm.envUint("PRIVATE_KEY");
-        address admin  = vm.envAddress("DEFAULT_ADMIN");
+        uint pk = vm.envUint("PRIVATE_KEY");
+        address admin = vm.envAddress("DEFAULT_ADMIN");
         address pauser = vm.envAddress("PAUSER");
         address minter = vm.envAddress("MINTER");
 
@@ -18,18 +19,10 @@ contract Deploy is Script {
         NewLoPoint impl = new NewLoPoint();
         ProxyAdmin proxyAdmin = new ProxyAdmin(admin);
 
-        bytes memory data = abi.encodeWithSelector(
-            impl.initialize.selector,
-            admin,
-            pauser,
-            minter
-        );
+        bytes memory data = abi.encodeWithSelector(impl.initialize.selector, admin, pauser, minter);
 
-        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
-            address(impl),
-            address(proxyAdmin),
-            data
-        );
+        TransparentUpgradeableProxy proxy =
+            new TransparentUpgradeableProxy(address(impl), address(proxyAdmin), data);
 
         vm.stopBroadcast();
 
