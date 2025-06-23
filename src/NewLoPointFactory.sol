@@ -14,7 +14,7 @@ contract NewLoPointFactory {
 
     constructor() {
         implementation = address(new NewLoPoint());
-        proxyAdmin = new ProxyAdmin();
+        proxyAdmin = new ProxyAdmin(msg.sender);
     }
 
     function deployToken(

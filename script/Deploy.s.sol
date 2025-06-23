@@ -16,7 +16,7 @@ contract Deploy is Script {
         vm.startBroadcast(pk);
 
         NewLoPoint impl = new NewLoPoint();
-        ProxyAdmin proxyAdmin = new ProxyAdmin();
+        ProxyAdmin proxyAdmin = new ProxyAdmin(admin);
 
         bytes memory data = abi.encodeWithSelector(
             impl.initialize.selector,
