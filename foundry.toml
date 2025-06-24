@@ -15,10 +15,11 @@ via_ir = false
 # EVM version
 evm_version = "cancun"
 
-# Remappings for OpenZeppelin libraries
+# Remappings for OpenZeppelin libraries and Chainlink
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+    "@chainlink/contracts/=lib/chainlink-evm/contracts/",
     "forge-std/=lib/forge-std/src/"
 ]
 

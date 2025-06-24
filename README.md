@@ -25,6 +25,14 @@ NewLo Point is an ERC20 point token with gradual transfer control functionality.
 - **EIP-2612 Permit**: Gasless approvals
 - **Event Emissions**: Events for all important operations
 
+### 💱 Exchange System (NLPToETHExchange)
+- **Real-time Price Conversion**: Uses Chainlink ETH/USD and JPY/USD price feeds
+- **1:1 Exchange Rate**: 1 NLP = 1 JPY worth of ETH
+- **Fee System**: Configurable exchange fees (0-5%)
+- **Emergency Controls**: Pause functionality and emergency withdrawals
+- **Burn Mechanism**: NLP tokens are burned during exchange
+- **Statistics Tracking**: User and global exchange statistics
+
 ## 🏗️ Architecture
 
 ### Contract Structure
@@ -39,6 +47,12 @@ NewLoPoint (Upgradeable ERC20)
 
 NewLoPointFactory
 └── Deterministic Deployment using Create2
+
+NLPToETHExchange (Exchange Contract)
+├── Ownable (Administrative control)
+├── ReentrancyGuard (Prevents reentrancy attacks)
+├── Pausable (Emergency halt functionality)
+└── ChainlinkAggregatorV3Interface (Real-time price feeds)
 ```
 
 ### Transfer Control Logic
@@ -164,9 +178,51 @@ token.pause();
 token.unpause();
 ```
 
+### 5. Exchange Operations (NLPToETHExchange)
+
+#### Deploy Exchange
+```solidity
+NLPToETHExchange exchange = new NLPToETHExchange(
+    address(nlpToken),      // NLP token address
+    ethUsdPriceFeed,        // Chainlink ETH/USD price feed
+    jpyUsdPriceFeed,        // Chainlink JPY/USD price feed
+    adminAddress            // Exchange admin
+);
+
+// Fund exchange contract with ETH
+address(exchange).call{value: 100 ether}("");
+```
+
+#### Exchange NLP for ETH
+```solidity
+// User approves NLP tokens for exchange
+nlpToken.approve(address(exchange), 1000 * 10**18);
+
+// Get exchange quote
+(uint ethAmount, uint ethUsdRate, uint jpyUsdRate, uint fee) = 
+    exchange.getExchangeQuote(1000 * 10**18);
+
+// Execute exchange
+exchange.exchangeNLPToETH(1000 * 10**18);
+```
+
+#### Exchange Management
+```solidity
+// Set exchange fee (admin only)
+exchange.setExchangeFee(100); // 1%
+
+// Pause/unpause exchange
+exchange.pause();
+exchange.unpause();
+
+// Emergency withdraw ETH
+exchange.emergencyWithdrawETH(payable(adminAddress), 0); // 0 = all
+```
+
 ## 🧪 Test Cases
 
 ### Coverage
+**NewLoPoint Token:**
 - ✅ Initial state verification
 - ✅ Transfer restriction functionality
 - ✅ Whitelist functionality
@@ -176,29 +232,53 @@ token.unpause();
 - ✅ Emergency pause functionality
 - ✅ Mint/Burn functionality
 
+**NLPToETHExchange:**
+- ✅ Exchange functionality with price feeds
+- ✅ Fee calculation and application
+- ✅ Exchange quote generation
+- ✅ Admin controls (pause/unpause, fee setting)
+- ✅ Emergency withdrawal functionality
+- ✅ Reentrancy protection
+- ✅ Price staleness validation
+
 ### Examples
 ```bash
 # Run all tests with verbose output
 forge test -vv
 
-# Test specific functionality
+# Test specific functionality - Token
 forge test --match-test testWhitelistMode -vv
 forge test --match-test testAccessControl -vv
+
+# Test specific functionality - Exchange
+forge test --match-contract NLPToETHExchangeTest -vv
+forge test --match-test test_ExchangeNLPToETH_Success -vv
 ```
 
 ## 🔒 Security
 
 ### Audit Status
 - ✅ Slither static analysis completed
-- ✅ No critical vulnerabilities found
-- ✅ OpenZeppelin standard libraries used
+- ✅ No critical vulnerabilities found in our contracts
+- ✅ OpenZeppelin & Chainlink standard libraries used
+- ✅ Exchange contract security improvements implemented 
+- ✅ CEI pattern compliance enhanced
 - ⚠️  External audit recommended before production
 
 ### Security Features
+**Token Contract:**
 - Role-based access control
 - Gradual privilege transition
 - Emergency pause functionality
 - Upgradeability (requires careful management)
+
+**Exchange Contract:**
+- Reentrancy protection (ReentrancyGuard)
+- Price feed validation & staleness checks
+- Fee bounds enforcement (max 5%)
+- Emergency pause & withdrawal functions
+- CEI pattern compliance
+- Integer overflow protection (Solidity 0.8.27)
 
 ## 📁 Project Structure
 
@@ -206,12 +286,22 @@ forge test --match-test testAccessControl -vv
 newlo-point-contract/
 ├── src/
 │   ├── NewLoPoint.sol           # Main token contract
-│   └── NewLoPointFactory.sol    # Factory contract
+│   ├── NewLoPointFactory.sol    # Factory contract
+│   ├── NLPToETHExchange.sol     # Exchange contract
+│   ├── interfaces/
+│   │   └── IERC20Extended.sol   # Extended ERC20 interface
+│   └── mocks/
+│       └── MockV3Aggregator.sol # Mock Chainlink price feed for testing
 ├── test/
-│   └── NewLoPoint.t.sol         # Test suite
+│   ├── NewLoPoint.t.sol         # Token test suite
+│   └── NLPToETHExchange.t.sol   # Exchange test suite
 ├── script/
 │   └── Deploy.s.sol             # Deployment script
 ├── lib/                         # Dependencies
+│   ├── forge-std/               # Foundry standard library
+│   ├── openzeppelin-contracts/  # OpenZeppelin contracts
+│   ├── openzeppelin-contracts-upgradeable/
+│   └── chainlink-evm/           # Chainlink contracts
 ├── foundry.toml                 # Foundry configuration
 ├── README.md                    # This file
 └── docs/                        # Documentation
