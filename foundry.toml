@@ -5,6 +5,8 @@ libs = ["lib"]
 test = "test"
 cache_path = "cache"
 script = "script"
+build_info = true
+extra_output = ["storageLayout"]
 
 # Solidity compiler settings
 solc = "0.8.27"
@@ -20,7 +22,8 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
     "@chainlink/contracts/=lib/chainlink-evm/contracts/",
-    "forge-std/=lib/forge-std/src/"
+    "forge-std/=lib/forge-std/src/",
+    "openzeppelin-foundry-upgrades/=lib/openzeppelin-foundry-upgrades/"
 ]
 
 # Gas limit for tests
