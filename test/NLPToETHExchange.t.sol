@@ -19,8 +19,8 @@ contract NLPToETHExchangeTest is Test {
     address public user2 = makeAddr("user2");
 
     uint8 constant PRICE_FEED_DECIMALS = 8;
-    int256 constant INITIAL_ETH_USD_PRICE = 2000_00000000; // $2000
-    int256 constant INITIAL_JPY_USD_PRICE = 670000; // ¥1 = $0.0067 (8 decimals)
+    int constant INITIAL_ETH_USD_PRICE = 2000_00000000; // $2000
+    int constant INITIAL_JPY_USD_PRICE = 670000; // ¥1 = $0.0067 (8 decimals)
     uint constant INITIAL_ETH_BALANCE = 100 ether;
     uint constant USER_NLP_BALANCE = 10000 * 10 ** 18;
 

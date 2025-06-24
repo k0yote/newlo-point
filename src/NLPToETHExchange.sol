@@ -4,7 +4,8 @@ pragma solidity ^0.8.27;
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
-import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { AggregatorV3Interface } from
+    "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 
 /**
@@ -245,10 +246,12 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
      */
     function getLatestETHPrice() public view returns (uint price) {
         (
-            /* uint80 roundId */,
-            int256 priceInt,
-            /* uint256 startedAt */,
-            uint256 updatedAt,
+            /* uint80 roundId */
+            ,
+            int priceInt,
+            /* uint256 startedAt */
+            ,
+            uint updatedAt,
             /* uint80 answeredInRound */
         ) = ethUsdPriceFeed.latestRoundData();
 
@@ -262,7 +265,7 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
 
         // Convert Chainlink price to 18 decimals
         uint8 decimals = ethUsdPriceFeed.decimals();
-        price = uint256(priceInt) * (10 ** (18 - decimals));
+        price = uint(priceInt) * (10 ** (18 - decimals));
     }
 
     /**
@@ -271,10 +274,12 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
      */
     function getLatestJPYPrice() public view returns (uint price) {
         (
-            /* uint80 roundId */,
-            int256 priceInt,
-            /* uint256 startedAt */,
-            uint256 updatedAt,
+            /* uint80 roundId */
+            ,
+            int priceInt,
+            /* uint256 startedAt */
+            ,
+            uint updatedAt,
             /* uint80 answeredInRound */
         ) = jpyUsdPriceFeed.latestRoundData();
 
@@ -288,7 +293,7 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
 
         // Convert Chainlink price to 18 decimals
         uint8 decimals = jpyUsdPriceFeed.decimals();
-        price = uint256(priceInt) * (10 ** (18 - decimals));
+        price = uint(priceInt) * (10 ** (18 - decimals));
     }
 
     /**
