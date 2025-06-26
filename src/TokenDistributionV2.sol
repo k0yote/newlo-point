@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "./interfaces/IERC20Extended.sol";
 import { NewLoPoint } from "./NewLoPoint.sol";
 
 /**
@@ -16,7 +19,14 @@ import { NewLoPoint } from "./NewLoPoint.sol";
  *      - Whitelist system integration for secure operations while maintaining transfer restrictions
  *      - Comprehensive statistics tracking and monitoring capabilities
  *      - Anti-duplicate distribution protection with configurable time windows
+ *      - Role-based access control with multiple administrative roles
  *      - Emergency controls and administrative functions
+ *
+ * @dev Role-based Access Control:
+ *      - DEFAULT_ADMIN_ROLE: Full administrative control, can grant/revoke all roles
+ *      - DISTRIBUTOR_ROLE: Can execute distribution operations
+ *      - DEPOSIT_MANAGER_ROLE: Can deposit and withdraw tokens
+ *      - PAUSER_ROLE: Can pause/unpause contract operations
  *
  * @dev Operational Model:
  *      1. Administrator pre-deposits large amounts of tokens into this contract
@@ -44,14 +54,30 @@ import { NewLoPoint } from "./NewLoPoint.sol";
  *      - Maintains transfer restrictions for regular users
  *      - Preserves full administrative control for token managers
  *      - Implements comprehensive reentrancy and pause protections
+ *      - Role-based permissions for granular access control
  *
  * @dev Inheritance Chain:
  *      TokenDistributionV2
- *      ├── Ownable (administrative control)
+ *      ├── AccessControl (role-based access control)
  *      ├── ReentrancyGuard (reentrancy attack protection)
  *      └── Pausable (emergency halt functionality)
  */
-contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
+contract TokenDistributionV2 is AccessControl, ReentrancyGuard, Pausable {
+    using SafeERC20 for IERC20;
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                                  ROLES
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /// @notice Role for executing distribution operations
+    bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
+
+    /// @notice Role for managing token deposits and withdrawals
+    bytes32 public constant DEPOSIT_MANAGER_ROLE = keccak256("DEPOSIT_MANAGER_ROLE");
+
+    /// @notice Role for pausing and unpausing contract operations
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
     /* ═══════════════════════════════════════════════════════════════════════
                                IMMUTABLE STATE
     ═══════════════════════════════════════════════════════════════════════ */
@@ -140,17 +166,20 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Initializes the TokenDistributionV2 contract
      * @param _nlpToken Address of the NewLoPoint token contract to distribute
-     * @param _initialOwner Address that will become the owner of this contract
+     * @param _defaultAdmin Address that will receive the DEFAULT_ADMIN_ROLE
      *
      * Requirements:
      * - _nlpToken must not be the zero address
-     * - _initialOwner must not be the zero address
+     * - _defaultAdmin must not be the zero address
      */
-    constructor(address _nlpToken, address _initialOwner) Ownable(_initialOwner) {
+    constructor(address _nlpToken, address _defaultAdmin) {
         require(_nlpToken != address(0), "NLP token address cannot be zero");
-        require(_initialOwner != address(0), "Initial owner cannot be zero");
+        require(_defaultAdmin != address(0), "Default admin cannot be zero");
 
         nlpToken = NewLoPoint(_nlpToken);
+        
+        // Grant DEFAULT_ADMIN_ROLE to the specified admin
+        _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -164,14 +193,14 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @dev Administrator pre-deposits large token amounts to enable efficient distribution
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DEPOSIT_MANAGER_ROLE
      * - Amount must be greater than 0
      * - Administrator must have set sufficient allowance for this contract
      *
      * Emits:
      * - TokensDeposited event
      */
-    function depositTokens(uint amount) external onlyOwner {
+    function depositTokens(uint amount) external onlyRole(DEPOSIT_MANAGER_ROLE) {
         require(amount > 0, "Amount must be greater than 0");
 
         bool success = nlpToken.transferFrom(msg.sender, address(this), amount);
@@ -189,17 +218,17 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @param to Address to receive the withdrawn tokens
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DEPOSIT_MANAGER_ROLE
      * - Recipient address must not be zero address
      * - Contract must have sufficient balance
      */
-    function emergencyWithdraw(uint amount, address to) external onlyOwner {
+    function emergencyWithdraw(uint amount, address to) external onlyRole(DEPOSIT_MANAGER_ROLE) {
         require(to != address(0), "Invalid address");
 
         uint withdrawAmount = amount == 0 ? nlpToken.balanceOf(address(this)) : amount;
         require(withdrawAmount <= nlpToken.balanceOf(address(this)), "Insufficient balance");
 
-        nlpToken.transfer(to, withdrawAmount);
+        IERC20(address(nlpToken)).safeTransfer(to, withdrawAmount);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -215,7 +244,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @dev Achieves 92% gas reduction compared to mint-based approach through transfer operations
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DISTRIBUTOR_ROLE
      * - Contract must not be paused
      * - Recipients array must not be empty and not exceed MAX_BATCH_SIZE
      * - Amount must be greater than 0
@@ -229,7 +258,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      */
     function distributeEqual(address[] calldata recipients, uint amount)
         external
-        onlyOwner
+        onlyRole(DISTRIBUTOR_ROLE)
         whenNotPaused
         nonReentrant
         returns (uint batchId)
@@ -268,7 +297,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
             }
 
             // Execute efficient transfer
-            nlpToken.transfer(recipient, amount);
+            IERC20(address(nlpToken)).safeTransfer(recipient, amount);
 
             // Update statistics
             userTotalReceived[recipient] += amount;
@@ -306,7 +335,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @return batchId ID of the executed distribution batch
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DISTRIBUTOR_ROLE
      * - Contract must not be paused
      * - Recipients and amounts arrays must have the same length
      * - Arrays must not be empty and not exceed MAX_BATCH_SIZE
@@ -321,7 +350,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      */
     function distributeVariable(address[] calldata recipients, uint[] calldata amounts)
         external
-        onlyOwner
+        onlyRole(DISTRIBUTOR_ROLE)
         whenNotPaused
         nonReentrant
         returns (uint batchId)
@@ -369,7 +398,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
             }
 
             // Execute efficient transfer
-            nlpToken.transfer(recipient, amount);
+            IERC20(address(nlpToken)).safeTransfer(recipient, amount);
 
             // Update statistics
             userTotalReceived[recipient] += amount;
@@ -491,7 +520,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @param depositAmount Initial deposit amount (0 to skip deposit)
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DEFAULT_ADMIN_ROLE
      * - Caller must have WHITELIST_MANAGER_ROLE or DEFAULT_ADMIN_ROLE on NewLoPoint token
      *
      * Actions Performed:
@@ -502,7 +531,7 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * Emits:
      * - TokensDeposited event if deposit amount > 0
      */
-    function setupForEfficientDistribution(uint depositAmount) external onlyOwner {
+    function setupForEfficientDistribution(uint depositAmount) external onlyRole(DEFAULT_ADMIN_ROLE) {
         // Step 1: Enable whitelist mode on token contract
         try nlpToken.setWhitelistModeEnabled(true) {
             // Success - whitelist mode enabled
@@ -571,12 +600,12 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @dev When enabled, prevents users from receiving distributions within 24 hours of their last receipt
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have DEFAULT_ADMIN_ROLE
      *
      * Emits:
      * - AntiDuplicateModeChanged event
      */
-    function setAntiDuplicateMode(bool enabled) external onlyOwner {
+    function setAntiDuplicateMode(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
         antiDuplicateMode = enabled;
         emit AntiDuplicateModeChanged(enabled);
     }
@@ -585,10 +614,10 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @notice Pauses the contract, preventing all distribution operations
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have PAUSER_ROLE
      * - Contract must not already be paused
      */
-    function pause() external onlyOwner {
+    function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
@@ -596,10 +625,10 @@ contract TokenDistributionV2 is Ownable, ReentrancyGuard, Pausable {
      * @notice Unpauses the contract, restoring distribution operations
      *
      * Requirements:
-     * - Only owner can call this function
+     * - Caller must have PAUSER_ROLE
      * - Contract must be paused
      */
-    function unpause() external onlyOwner {
+    function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
     }
 

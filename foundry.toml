@@ -53,6 +53,9 @@ goerli = "${GOERLI_RPC_URL}"
 sepolia = "${SEPOLIA_RPC_URL}"
 polygon = "${POLYGON_RPC_URL}"
 arbitrum = "${ARBITRUM_RPC_URL}"
+# Soneium endpoints
+soneium = "${SONEIUM_RPC_URL}"
+soneium-minato-testnet = "https://rpc.minato.soneium.org/"
 
 # Etherscan API keys
 [etherscan]
@@ -61,5 +64,8 @@ goerli = { key = "${ETHERSCAN_API_KEY}" }
 sepolia = { key = "${ETHERSCAN_API_KEY}" }
 polygon = { key = "${POLYGONSCAN_API_KEY}" }
 arbitrum = { key = "${ARBISCAN_API_KEY}" }
+# Soneium Blockscout API
+soneium = { key = "${SONEIUM_API_KEY}", url = "https://soneium.blockscout.com/api" }
+soneium-minato-testnet = { key = "${SONEIUM_API_KEY}", url = "https://soneium-minato.blockscout.com/api" }
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

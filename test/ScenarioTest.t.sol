@@ -381,9 +381,19 @@ contract ScenarioTest is Test {
 
         distributionContract = new TokenDistributionV2(address(nlpToken), distributionOwner);
 
+        // Grant necessary roles to distributionOwner for scenario testing
+        vm.startPrank(distributionOwner);
+        distributionContract.grantRole(distributionContract.DISTRIBUTOR_ROLE(), distributionOwner);
+        distributionContract.grantRole(distributionContract.DEPOSIT_MANAGER_ROLE(), distributionOwner);
+        distributionContract.grantRole(distributionContract.PAUSER_ROLE(), distributionOwner);
+        vm.stopPrank();
+
         // Verify deployment
         assertEq(address(distributionContract.nlpToken()), address(nlpToken));
-        assertEq(distributionContract.owner(), distributionOwner);
+        assertTrue(distributionContract.hasRole(distributionContract.DEFAULT_ADMIN_ROLE(), distributionOwner));
+        assertTrue(distributionContract.hasRole(distributionContract.DISTRIBUTOR_ROLE(), distributionOwner));
+        assertTrue(distributionContract.hasRole(distributionContract.DEPOSIT_MANAGER_ROLE(), distributionOwner));
+        assertTrue(distributionContract.hasRole(distributionContract.PAUSER_ROLE(), distributionOwner));
 
         // console.log("TokenDistributionV2 deployed at:", address(distributionContract));
         // console.log("Owner set to:", distributionOwner);
