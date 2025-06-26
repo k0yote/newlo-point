@@ -177,7 +177,7 @@ contract TokenDistributionV2 is AccessControl, ReentrancyGuard, Pausable {
         require(_defaultAdmin != address(0), "Default admin cannot be zero");
 
         nlpToken = NewLoPoint(_nlpToken);
-        
+
         // Grant DEFAULT_ADMIN_ROLE to the specified admin
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
     }
@@ -531,7 +531,10 @@ contract TokenDistributionV2 is AccessControl, ReentrancyGuard, Pausable {
      * Emits:
      * - TokensDeposited event if deposit amount > 0
      */
-    function setupForEfficientDistribution(uint depositAmount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setupForEfficientDistribution(uint depositAmount)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         // Step 1: Enable whitelist mode on token contract
         try nlpToken.setWhitelistModeEnabled(true) {
             // Success - whitelist mode enabled

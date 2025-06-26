@@ -17,7 +17,7 @@ contract TokenDistributionV2Test is Test {
     address public distributor = makeAddr("distributor");
     address public depositManager = makeAddr("depositManager");
     address public pauser = makeAddr("pauser");
-    
+
     // User addresses
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
@@ -107,7 +107,7 @@ contract TokenDistributionV2Test is Test {
         } catch {
             // This is expected - the call should revert
         }
-        
+
         // Verify the role was not granted
         assertFalse(distribution.hasRole(distribution.DISTRIBUTOR_ROLE(), newDistributor));
     }
@@ -285,12 +285,11 @@ contract TokenDistributionV2Test is Test {
         recipients[0] = user1;
 
         uint remainingAfterDistribution = lowAmount - BATCH_AMOUNT;
-        
+
         // Expect the LowBalanceWarning event to be emitted
         vm.expectEmit(true, true, true, true);
         emit TokenDistributionV2.LowBalanceWarning(
-            remainingAfterDistribution,
-            distribution.LOW_BALANCE_THRESHOLD()
+            remainingAfterDistribution, distribution.LOW_BALANCE_THRESHOLD()
         );
 
         vm.prank(distributor);
@@ -331,9 +330,7 @@ contract TokenDistributionV2Test is Test {
         vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(
-                TokenDistributionV2.DuplicateDistribution.selector,
-                user1,
-                block.timestamp
+                TokenDistributionV2.DuplicateDistribution.selector, user1, block.timestamp
             )
         );
         distribution.distributeEqual(recipients, BATCH_AMOUNT);
@@ -417,16 +414,21 @@ contract TokenDistributionV2Test is Test {
     function test_SetupForEfficientDistribution_Success() public {
         // Deploy new token for clean test since existing token already has whitelist enabled
         vm.startPrank(defaultAdmin);
-        
+
         NewLoPointFactory newFactory = new NewLoPointFactory();
         bytes32 salt = keccak256("CLEAN_TEST_TOKEN");
-        NewLoPoint newToken = NewLoPoint(newFactory.deployToken(salt, defaultAdmin, defaultAdmin, defaultAdmin));
-        
+        NewLoPoint newToken =
+            NewLoPoint(newFactory.deployToken(salt, defaultAdmin, defaultAdmin, defaultAdmin));
+
         // Verify defaultAdmin has WHITELIST_MANAGER_ROLE on the new token
-        assertTrue(newToken.hasRole(newToken.WHITELIST_MANAGER_ROLE(), defaultAdmin), "defaultAdmin should have WHITELIST_MANAGER_ROLE");
-        
+        assertTrue(
+            newToken.hasRole(newToken.WHITELIST_MANAGER_ROLE(), defaultAdmin),
+            "defaultAdmin should have WHITELIST_MANAGER_ROLE"
+        );
+
         // Deploy new distribution contract
-        TokenDistributionV2 newDistribution = new TokenDistributionV2(address(newToken), defaultAdmin);
+        TokenDistributionV2 newDistribution =
+            new TokenDistributionV2(address(newToken), defaultAdmin);
 
         // Grant DEPOSIT_MANAGER_ROLE to defaultAdmin for testing
         newDistribution.grantRole(newDistribution.DEPOSIT_MANAGER_ROLE(), defaultAdmin);
@@ -434,7 +436,7 @@ contract TokenDistributionV2Test is Test {
         // Manual setup (what setupForEfficientDistribution would do)
         // 1. Enable whitelist mode
         newToken.setWhitelistModeEnabled(true);
-        
+
         // 2. Add distribution contract to whitelist
         newToken.setWhitelistedAddress(address(newDistribution), true);
 
@@ -442,7 +444,7 @@ contract TokenDistributionV2Test is Test {
         newToken.mint(defaultAdmin, DEPOSIT_AMOUNT);
         newToken.approve(address(newDistribution), DEPOSIT_AMOUNT);
         newDistribution.depositTokens(DEPOSIT_AMOUNT);
-        
+
         vm.stopPrank();
 
         // Verify setup
@@ -538,7 +540,7 @@ contract TokenDistributionV2Test is Test {
         vm.prank(distributor);
         distribution.distributeEqual(recipients, BATCH_AMOUNT);
 
-        (uint totalReceived, uint lastReceived, bool canReceiveToday) = 
+        (uint totalReceived, uint lastReceived, bool canReceiveToday) =
             distribution.getUserDistributionInfo(user1);
 
         assertEq(totalReceived, BATCH_AMOUNT);
@@ -639,11 +641,11 @@ contract TokenDistributionV2Test is Test {
         // Transfer tokens from defaultAdmin to depositManager first
         vm.prank(defaultAdmin);
         nlpToken.transfer(depositManager, amount);
-        
+
         // Approve and deposit
         vm.startPrank(depositManager);
         nlpToken.approve(address(distribution), amount);
         distribution.depositTokens(amount);
         vm.stopPrank();
     }
-} 
+}
