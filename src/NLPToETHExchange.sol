@@ -104,6 +104,17 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
     /// @notice Emitted when price data is stale
     event PriceStale(uint timestamp, uint threshold);
 
+    /// @notice Emitted when NLP is exchanged for ETH using permit for gasless operation
+    event GaslessExchangeExecuted(
+        address indexed user,
+        address indexed relayer,
+        uint nlpAmount,
+        uint ethAmount,
+        uint ethUsdRate,
+        uint jpyUsdRate,
+        uint fee
+    );
+
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -114,6 +125,8 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
     error InvalidPriceData(int price);
     error ExchangeFailed(address user, uint nlpAmount);
     error InvalidFee(uint fee, uint maxFee);
+    error InvalidUser(address user);
+    error PermitFailed(address user, uint nlpAmount, uint deadline);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -145,6 +158,103 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
     /* ═══════════════════════════════════════════════════════════════════════
                             EXCHANGE FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Exchange NLP tokens for ETH using permit for gasless operation
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
+     *
+     * @dev Gasless Exchange Process:
+     *      1. Validate input parameters
+     *      2. Execute permit() to allow this contract to spend user's tokens
+     *      3. Get current ETH/USD and JPY/USD prices
+     *      4. Calculate ETH amount: (nlpAmount * jpyUsdPrice) / ethUsdPrice
+     *      5. Apply exchange fee
+     *      6. Burn NLP tokens from user
+     *      7. Send ETH to user
+     *      8. Update statistics
+     *
+     * Requirements:
+     * - Contract must not be paused
+     * - nlpAmount must be greater than 0
+     * - User must have sufficient NLP tokens
+     * - Permit signature must be valid and not expired
+     * - Contract must have sufficient ETH balance
+     * - Caller pays gas fees (typically a relayer operated by the team)
+     */
+    function exchangeNLPToETHWithPermit(
+        uint nlpAmount,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
+        }
+
+        // Execute permit to allow this contract to spend user's tokens
+        // This eliminates the need for user to call approve() separately
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Get current prices from Chainlink oracles
+        uint ethUsdPrice = getLatestETHPrice();
+        uint jpyUsdPrice = getLatestJPYPrice();
+
+        // Calculate required ETH amount
+        // Formula: ethAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice
+        uint ethAmountBeforeFee = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+
+        // Calculate and apply fee
+        uint fee = (ethAmountBeforeFee * exchangeFee) / 10000;
+        uint ethAmountAfterFee = ethAmountBeforeFee - fee;
+
+        // Check contract ETH balance
+        if (address(this).balance < ethAmountAfterFee) {
+            revert InsufficientETHBalance(ethAmountAfterFee, address(this).balance);
+        }
+
+        // Update statistics before external calls (CEI pattern)
+        totalExchanged += nlpAmount;
+        totalETHSent += ethAmountAfterFee;
+        userExchangeAmount[user] += nlpAmount;
+        userETHReceived[user] += ethAmountAfterFee;
+
+        // Burn NLP tokens from user (using the permit approval)
+        try nlpToken.burnFrom(user, nlpAmount) {
+            // Burn successful
+        } catch {
+            revert ExchangeFailed(user, nlpAmount);
+        }
+
+        // Send ETH to user
+        (bool ethSent,) = user.call{ value: ethAmountAfterFee }("");
+        require(ethSent, "ETH transfer failed");
+
+        // Emit gasless exchange event
+        emit GaslessExchangeExecuted(
+            user,
+            msg.sender, // relayer
+            nlpAmount,
+            ethAmountAfterFee,
+            ethUsdPrice,
+            jpyUsdPrice,
+            fee
+        );
+    }
 
     /**
      * @notice Exchange NLP tokens for ETH

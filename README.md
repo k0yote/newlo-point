@@ -328,6 +328,195 @@ uint batchId2 = distributionV2.distributeVariable(recipients, amounts);
 ) = distributionV2.checkSetupStatus();
 ```
 
+## 🚀 Usage Flow
+
+### 💸 ガスレス交換システム（Permit機能）
+
+NewLo Pointトークンは、**完全ガスフリー**での交換を実現するpermit機能を搭載しています。ユーザーは署名のみで交換でき、運営がガス代を負担します。
+
+#### システム概要
+
+```mermaid
+sequenceDiagram
+    participant User as 👤 ユーザー
+    participant Frontend as 🌐 フロントエンド
+    participant Relayer as 🏢 リレイヤー（運営）
+    participant Exchange as 📄 交換コントラクト
+    participant NLP as 🪙 NLPトークン
+
+    User->>Frontend: 交換リクエスト
+    Frontend->>User: 📝 Permit署名要求
+    User->>Frontend: ✍️ 署名完了（ガス代不要）
+    Frontend->>Relayer: 📤 署名データ送信
+    Relayer->>Exchange: ⚡ exchangeNLPToETHWithPermit実行
+    Exchange->>NLP: 🔐 permit()実行
+    Exchange->>NLP: 🔥 burnFrom()実行  
+    Exchange->>User: 💰 ETH送金完了
+    Note over Relayer: 💳 ガス代負担
+```
+
+#### フロントエンド実装例
+
+```typescript
+import { ethers } from 'ethers';
+
+interface PermitSignature {
+    v: number;
+    r: string;
+    s: string;
+    deadline: number;
+}
+
+/**
+ * Permit署名を作成（ユーザー側 - ガス代不要）
+ */
+async function createPermitSignature(
+    provider: ethers.Provider,
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string,
+    amount: string,
+    deadline: number,
+    privateKey: string
+): Promise<PermitSignature> {
+    const wallet = new ethers.Wallet(privateKey, provider);
+    const token = new ethers.Contract(tokenAddress, ERC20_PERMIT_ABI, wallet);
+    
+    // Domain separator and nonce
+    const [nonce, name, version, chainId] = await Promise.all([
+        token.nonces(ownerAddress),
+        token.name(),
+        '1',
+        wallet.getChainId()
+    ]);
+
+    // EIP-712 domain
+    const domain = {
+        name,
+        version,
+        chainId,
+        verifyingContract: tokenAddress
+    };
+
+    // Permit message
+    const types = {
+        Permit: [
+            { name: 'owner', type: 'address' },
+            { name: 'spender', type: 'address' },
+            { name: 'value', type: 'uint256' },
+            { name: 'nonce', type: 'uint256' },
+            { name: 'deadline', type: 'uint256' }
+        ]
+    };
+
+    const message = {
+        owner: ownerAddress,
+        spender: spenderAddress,
+        value: amount,
+        nonce: nonce.toString(),
+        deadline: deadline.toString()
+    };
+
+    // 署名作成（ガス代不要）
+    const signature = await wallet._signTypedData(domain, types, message);
+    const sig = ethers.utils.splitSignature(signature);
+
+    return {
+        v: sig.v,
+        r: sig.r,
+        s: sig.s,
+        deadline
+    };
+}
+
+/**
+ * ガスレス交換の実行（リレイヤー側 - ガス代負担）
+ */
+async function executeGaslessExchange(
+    provider: ethers.Provider,
+    exchangeAddress: string,
+    nlpAmount: string,
+    signature: PermitSignature,
+    userAddress: string,
+    relayerPrivateKey: string
+) {
+    const relayerWallet = new ethers.Wallet(relayerPrivateKey, provider);
+    const exchange = new ethers.Contract(exchangeAddress, EXCHANGE_ABI, relayerWallet);
+
+    // リレイヤーがガス代を負担して実行
+    const tx = await exchange.exchangeNLPToETHWithPermit(
+        nlpAmount,
+        signature.deadline,
+        signature.v,
+        signature.r,
+        signature.s,
+        userAddress
+    );
+
+    return await tx.wait();
+}
+```
+
+#### 🔄 標準交換 vs ガスレス交換の比較
+
+| 項目 | 標準交換 | ガスレス交換 |
+|------|----------|--------------|
+| **ユーザーガス代** | ~207,611 gas | **0 gas** ✨ |
+| **リレイヤーガス代** | 0 gas | ~255,681 gas |
+| **ユーザー操作** | 2ステップ（approve + exchange） | **1ステップ（署名のみ）** |
+| **UXの優位性** | ❌ ガス代負担 | ✅ **完全無料** |
+| **実装の複雑さ** | 🟢 シンプル | 🟡 中程度 |
+
+#### 💡 導入メリット
+
+- **🆓 ユーザー負担ゼロ**: ガス代完全無料でサービス利用可能
+- **📱 モバイル対応**: ガス代の心配なくスマートフォンでも快適
+- **🎯 UX向上**: 署名のみの簡単操作で交換完了
+- **🔄 コンバージョン向上**: ガス代がハードルとならない
+
+#### ⚙️ 運営側の実装
+
+```javascript
+// バックエンド実装例（Node.js + Express）
+app.post('/api/gasless-exchange', async (req, res) => {
+    try {
+        const { nlpAmount, signature, userAddress } = req.body;
+        
+        // 1. レート制限チェック
+        if (await isRateLimited(userAddress)) {
+            return res.status(429).json({ error: 'Rate limit exceeded' });
+        }
+        
+        // 2. 署名の有効性検証
+        if (!await verifyPermitSignature(signature, userAddress, nlpAmount)) {
+            return res.status(400).json({ error: 'Invalid signature' });
+        }
+        
+        // 3. リレイヤーによるガスレス交換実行
+        const txHash = await executeGaslessExchange(
+            nlpAmount, signature, userAddress
+        );
+        
+        // 4. 結果返却
+        res.json({ 
+            success: true, 
+            txHash,
+            message: 'Gasless exchange completed' 
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+```
+
+#### 🛡️ セキュリティ考慮事項
+
+- **✅ Permit検証**: ERC20Permit標準準拠の署名検証
+- **✅ リエントランシー対策**: ReentrancyGuard実装済み
+- **✅ レート制限**: 過度な使用を防止する制限機能
+- **✅ 監視システム**: 異常な取引パターンの検出
+
 ## 🧪 Test Cases
 
 ### Coverage
@@ -430,7 +619,10 @@ newlo-point-contract/
 ├── foundry.toml                 # Foundry configuration
 ├── README.md                    # This file
 └── docs/                        # Documentation
-    ├── SLITHER_AUDIT.md         # Security audit report
+    ├── SLITHER_AUDIT_REPORT.md  # 🔒 Slitherセキュリティ分析レポート
+    ├── GASLESS_EXCHANGE_GUIDE.md # 💸 ガスレス交換機能実装ガイド
+    ├── SLITHER_AUDIT.md         # Security audit report (legacy)
+    ├── PRODUCTION_OPERATIONS_GUIDE.md # 本番運用ガイド
     └── TOKEN_DISTRIBUTION_V2.md # Bulk distribution setup guide
 ```
 
