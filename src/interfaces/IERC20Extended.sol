@@ -35,8 +35,8 @@ interface IERC20Extended is IERC20 {
     function permit(
         address owner,
         address spender,
-        uint256 value,
-        uint256 deadline,
+        uint value,
+        uint deadline,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -47,7 +47,7 @@ interface IERC20Extended is IERC20 {
      * @param owner The token owner's address
      * @return Current nonce value
      */
-    function nonces(address owner) external view returns (uint256);
+    function nonces(address owner) external view returns (uint);
 
     /**
      * @notice Returns the domain separator used in permit signature (ERC20Permit)

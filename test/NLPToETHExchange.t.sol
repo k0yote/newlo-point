@@ -31,7 +31,7 @@ contract NLPToETHExchangeTest is Test {
     address public relayer = address(0x3);
 
     // Permit signature parameters
-    uint256 userPrivateKey = 0x123;
+    uint userPrivateKey = 0x123;
     address userAddress;
 
     function setUp() public {
@@ -63,16 +63,13 @@ contract NLPToETHExchangeTest is Test {
 
         bytes memory initData = abi.encodeWithSelector(
             impl.initialize.selector,
-            admin,  // admin
-            admin,  // pauser
-            admin   // minter
+            admin, // admin
+            admin, // pauser
+            admin // minter
         );
 
-        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
-            address(impl),
-            address(adminProxy),
-            initData
-        );
+        TransparentUpgradeableProxy proxy =
+            new TransparentUpgradeableProxy(address(impl), address(adminProxy), initData);
 
         nlpToken = NewLoPoint(address(proxy));
 
@@ -169,54 +166,45 @@ contract NLPToETHExchangeTest is Test {
      * @notice Test permit-based gasless exchange functionality
      */
     function testExchangeNLPToETHWithPermit() public {
-        uint nlpAmount = 1000 * 10**18; // 1000 NLP
+        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
         uint deadline = block.timestamp + 1 hours;
-        
-                 // Calculate expected ETH amount
-         uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10**10; // Convert to 18 decimals
-         uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10**10; // Convert to 18 decimals
-         uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
-        
+
+        // Calculate expected ETH amount
+        uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
+        uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
+        uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+
         // Create permit signature
         (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
-            userAddress,
-            address(exchange),
-            nlpAmount,
-            deadline,
-            userPrivateKey
+            userAddress, address(exchange), nlpAmount, deadline, userPrivateKey
         );
-        
+
         // Record initial balances
         uint initialUserBalance = userAddress.balance;
         uint initialNLPBalance = nlpToken.balanceOf(userAddress);
-        
+
         // Execute gasless exchange via relayer
         vm.prank(relayer);
-        exchange.exchangeNLPToETHWithPermit(
-            nlpAmount,
-            deadline,
-            v,
-            r,
-            s,
-            userAddress
-        );
-        
+        exchange.exchangeNLPToETHWithPermit(nlpAmount, deadline, v, r, s, userAddress);
+
         // Verify results
         assertEq(nlpToken.balanceOf(userAddress), initialNLPBalance - nlpAmount, "NLP not burned");
         assertEq(userAddress.balance, initialUserBalance + expectedEthAmount, "ETH not received");
-        
+
         // Verify statistics updated
         assertEq(exchange.totalExchanged(), nlpAmount, "Total exchanged not updated");
-        assertEq(exchange.userExchangeAmount(userAddress), nlpAmount, "User exchange amount not updated");
+        assertEq(
+            exchange.userExchangeAmount(userAddress), nlpAmount, "User exchange amount not updated"
+        );
     }
-    
+
     /**
      * @notice Test permit signature validation
      */
     function testPermitSignatureValidation() public {
-        uint nlpAmount = 1000 * 10**18;
+        uint nlpAmount = 1000 * 10 ** 18;
         uint deadline = block.timestamp + 1 hours;
-        
+
         // Create invalid signature (wrong private key)
         (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
             userAddress,
@@ -225,129 +213,91 @@ contract NLPToETHExchangeTest is Test {
             deadline,
             0x456 // Wrong private key
         );
-        
+
         // Should revert with permit failed
         vm.prank(relayer);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NLPToETHExchange.PermitFailed.selector,
-                userAddress,
-                nlpAmount,
-                deadline
+                NLPToETHExchange.PermitFailed.selector, userAddress, nlpAmount, deadline
             )
         );
-        exchange.exchangeNLPToETHWithPermit(
-            nlpAmount,
-            deadline,
-            v,
-            r,
-            s,
-            userAddress
-        );
+        exchange.exchangeNLPToETHWithPermit(nlpAmount, deadline, v, r, s, userAddress);
     }
-    
+
     /**
      * @notice Test expired permit
      */
     function testExpiredPermit() public {
-        uint nlpAmount = 1000 * 10**18;
+        uint nlpAmount = 1000 * 10 ** 18;
         uint deadline = block.timestamp - 1; // Expired deadline
-        
+
         (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
-            userAddress,
-            address(exchange),
-            nlpAmount,
-            deadline,
-            userPrivateKey
+            userAddress, address(exchange), nlpAmount, deadline, userPrivateKey
         );
-        
+
         vm.prank(relayer);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NLPToETHExchange.PermitFailed.selector,
-                userAddress,
-                nlpAmount,
-                deadline
+                NLPToETHExchange.PermitFailed.selector, userAddress, nlpAmount, deadline
             )
         );
-        exchange.exchangeNLPToETHWithPermit(
-            nlpAmount,
-            deadline,
-            v,
-            r,
-            s,
-            userAddress
-        );
+        exchange.exchangeNLPToETHWithPermit(nlpAmount, deadline, v, r, s, userAddress);
     }
-    
+
     /**
      * @notice Test gasless exchange event emission
      */
     function testGaslessExchangeEvent() public {
-        uint nlpAmount = 1000 * 10**18;
+        uint nlpAmount = 1000 * 10 ** 18;
         uint deadline = block.timestamp + 1 hours;
-        
+
         (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
-            userAddress,
-            address(exchange),
-            nlpAmount,
-            deadline,
-            userPrivateKey
+            userAddress, address(exchange), nlpAmount, deadline, userPrivateKey
         );
-        
-                 // Calculate expected ETH amount
-         uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10**10; // Convert to 18 decimals
-         uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10**10; // Convert to 18 decimals
-         uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
-         
-         // Expect GaslessExchangeExecuted event
-         vm.expectEmit(true, true, false, true);
-         emit NLPToETHExchange.GaslessExchangeExecuted(
-             userAddress,    // user
-             relayer,        // relayer
-             nlpAmount,      // nlp amount
-             expectedEthAmount, // expected eth amount (calculated)
-             ethUsdPrice,    // eth rate
-             jpyUsdPrice,    // jpy rate
-             0               // fee (0% initially)
-         );
-        
+
+        // Calculate expected ETH amount
+        uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
+        uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
+        uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+
+        // Expect GaslessExchangeExecuted event
+        vm.expectEmit(true, true, false, true);
+        emit NLPToETHExchange.GaslessExchangeExecuted(
+            userAddress, // user
+            relayer, // relayer
+            nlpAmount, // nlp amount
+            expectedEthAmount, // expected eth amount (calculated)
+            ethUsdPrice, // eth rate
+            jpyUsdPrice, // jpy rate
+            0 // fee (0% initially)
+        );
+
         vm.prank(relayer);
-        exchange.exchangeNLPToETHWithPermit(
-            nlpAmount,
-            deadline,
-            v,
-            r,
-            s,
-            userAddress
-        );
+        exchange.exchangeNLPToETHWithPermit(nlpAmount, deadline, v, r, s, userAddress);
     }
-    
+
     /**
      * @notice Helper function to create permit signature
      */
     function _createPermitSignature(
         address tokenOwner,
         address spender,
-        uint256 value,
-        uint256 deadline,
-        uint256 privateKey
+        uint value,
+        uint deadline,
+        uint privateKey
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 domainSeparator = nlpToken.DOMAIN_SEPARATOR();
         bytes32 typeHash = keccak256(
             "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
         );
-        
-        uint256 nonce = nlpToken.nonces(tokenOwner);
-        
-        bytes32 structHash = keccak256(
-            abi.encode(typeHash, tokenOwner, spender, value, nonce, deadline)
-        );
-        
-        bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", domainSeparator, structHash)
-        );
-        
+
+        uint nonce = nlpToken.nonces(tokenOwner);
+
+        bytes32 structHash =
+            keccak256(abi.encode(typeHash, tokenOwner, spender, value, nonce, deadline));
+
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+
         return vm.sign(privateKey, digest);
     }
 
