@@ -548,6 +548,15 @@ app.post('/api/gasless-exchange', async (req, res) => {
 - ✅ Emergency controls and pause functionality
 - ✅ Automated setup and monitoring
 
+**SoneiumETHDistribution:**
+- ✅ Native ETH bulk distribution for Soneium network
+- ✅ Ultra-efficient batch operations (up to 500 users)
+- ✅ Role-based access control system
+- ✅ Anti-duplicate distribution protection
+- ✅ Comprehensive statistics and monitoring
+- ✅ Emergency controls and pause functionality
+- ✅ Reentrancy protection and security features
+
 ### Examples
 ```bash
 # Run all tests with verbose output
@@ -601,6 +610,7 @@ newlo-point-contract/
 │   ├── NLPToETHExchange.sol     # Exchange contract
 │   ├── TokenDistribution.sol    # Bulk distribution (mint-based)
 │   ├── TokenDistributionV2.sol  # Bulk distribution (transfer-based, 92% gas savings)
+│   ├── SoneiumETHDistribution.sol # ETH bulk distribution for Soneium network
 │   ├── interfaces/
 │   │   └── IERC20Extended.sol   # Extended ERC20 interface
 │   └── mocks/
@@ -608,9 +618,11 @@ newlo-point-contract/
 ├── test/
 │   ├── NewLoPoint.t.sol         # Token test suite
 │   ├── NLPToETHExchange.t.sol   # Exchange test suite
-│   └── TokenDistribution.t.sol  # Distribution test suite
+│   ├── TokenDistribution.t.sol  # Distribution test suite
+│   └── SoneiumETHDistribution.t.sol # Soneium ETH distribution test suite
 ├── script/
-│   └── Deploy.s.sol             # Deployment script
+│   ├── Deploy.s.sol             # Deployment script
+│   └── DeploySoneiumETHDistribution.s.sol # Soneium ETH distribution deployment
 ├── lib/                         # Dependencies
 │   ├── forge-std/               # Foundry standard library
 │   ├── openzeppelin-contracts/  # OpenZeppelin contracts
@@ -621,6 +633,8 @@ newlo-point-contract/
 └── docs/                        # Documentation
     ├── SLITHER_AUDIT_REPORT.md  # 🔒 Slitherセキュリティ分析レポート
     ├── GASLESS_EXCHANGE_GUIDE.md # 💸 ガスレス交換機能実装ガイド
+    ├── SONEIUM_ETH_DISTRIBUTION_GUIDE.md # 💰 Soneium ETH配布システム完全ガイド
+    ├── SONEIUM_ETH_DISTRIBUTION_AUDIT_REPORT.md # 🔒 Soneium ETH配布セキュリティ監査レポート
     ├── SLITHER_AUDIT.md         # Security audit report (legacy)
     ├── PRODUCTION_OPERATIONS_GUIDE.md # 本番運用ガイド
     └── TOKEN_DISTRIBUTION_V2.md # Bulk distribution setup guide
@@ -672,7 +686,42 @@ For questions or issues, please report them at [Issues](https://github.com/your-
 
 - **[Production Operations Guide](docs/PRODUCTION_OPERATIONS_GUIDE.md)** - Complete production operations manual based on scenario tests
 - **[TokenDistributionV2 Setup Guide](docs/TOKEN_DISTRIBUTION_V2.md)** - Complete guide for bulk distribution setup
+- **[Soneium ETH Distribution Guide](docs/SONEIUM_ETH_DISTRIBUTION_GUIDE.md)** - Complete guide for Soneium ETH bulk distribution system
+- **[Soneium ETH Distribution Audit Report](docs/SONEIUM_ETH_DISTRIBUTION_AUDIT_REPORT.md)** - 🔒 Comprehensive security audit for SoneiumETHDistribution contract
 - **[Security Audit Report](docs/SLITHER_AUDIT.md)** - Static analysis results
+
+## 🎯 Soneium ETH Distribution System
+
+### Overview
+The **SoneiumETHDistribution** contract provides an ultra-efficient system for distributing native ETH to large numbers of users on the Soneium network. Built with inspiration from TokenDistributionV2, it focuses on native ETH distribution rather than ERC20 tokens.
+
+### Key Features
+- **Native ETH Distribution**: Direct ETH distribution without token wrappers
+- **Bulk Operations**: Support for up to 500 users per batch
+- **Role-Based Access**: Granular permission system with multiple roles
+- **Anti-Duplicate Protection**: Prevent duplicate distributions within 24 hours
+- **Comprehensive Monitoring**: Real-time statistics and balance tracking
+- **Emergency Controls**: Pause functionality and emergency withdrawal
+
+### Quick Start
+```bash
+# Deploy the contract
+forge script script/DeploySoneiumETHDistribution.s.sol --rpc-url $RPC_URL --broadcast
+
+# Fund the contract
+cast send $CONTRACT_ADDRESS --value 1000ether --private-key $PRIVATE_KEY
+
+# Distribute ETH to users
+cast send $CONTRACT_ADDRESS "distributeEqual(address[],uint256)" "[0x...,0x...]" 1000000000000000000 --private-key $PRIVATE_KEY
+```
+
+### Use Cases
+- **Airdrop Campaigns**: Distribute ETH to community members
+- **Gaming Rewards**: Reward players with ETH based on performance
+- **DeFi Yield Distribution**: Distribute protocol earnings to stakeholders
+- **Community Incentives**: Reward active community participants
+
+For detailed implementation instructions, see the [Soneium ETH Distribution Guide](docs/SONEIUM_ETH_DISTRIBUTION_GUIDE.md).
 
 ---
 
