@@ -42,7 +42,6 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *      └── Pausable (emergency halt functionality)
  */
 contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
-
     /* ═══════════════════════════════════════════════════════════════════════
                                   ROLES
     ═══════════════════════════════════════════════════════════════════════ */
@@ -112,10 +111,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Emitted for each individual ETH distribution within a batch
     event ETHDistributed(
-        address indexed recipient, 
-        uint amount, 
-        uint indexed batchId, 
-        uint timestamp
+        address indexed recipient, uint amount, uint indexed batchId, uint timestamp
     );
 
     /// @notice Emitted when ETH is deposited into the contract
@@ -168,7 +164,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
 
         // Grant DEFAULT_ADMIN_ROLE to the specified admin
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
-        
+
         // Authorize default admin for emergency withdrawals
         authorizedEmergencyRecipients[_defaultAdmin] = true;
     }
@@ -192,7 +188,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
         if (msg.value == 0) {
             revert NoETHReceived();
         }
-        
+
         uint newBalance = address(this).balance;
         emit ETHDeposited(msg.sender, msg.value, newBalance);
     }
@@ -205,7 +201,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
         if (msg.value == 0) {
             revert NoETHReceived();
         }
-        
+
         uint newBalance = address(this).balance;
         emit ETHDeposited(msg.sender, msg.value, newBalance);
     }
@@ -220,12 +216,12 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
      * - Recipient address must not be zero address
      * - Contract must have sufficient balance
      */
-    function emergencyWithdraw(uint amount, address payable to) 
-        external 
-        onlyRole(DEPOSIT_MANAGER_ROLE) 
+    function emergencyWithdraw(uint amount, address payable to)
+        external
+        onlyRole(DEPOSIT_MANAGER_ROLE)
     {
         require(to != address(0), "Invalid address");
-        
+
         // Security: Only allow withdrawals to authorized recipients
         if (!authorizedEmergencyRecipients[to]) {
             revert UnauthorizedEmergencyRecipient(to);
@@ -234,7 +230,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
         uint withdrawAmount = amount == 0 ? address(this).balance : amount;
         require(withdrawAmount <= address(this).balance, "Insufficient balance");
 
-        (bool success, ) = to.call{value: withdrawAmount}("");
+        (bool success,) = to.call{ value: withdrawAmount }("");
         if (!success) {
             revert WithdrawalFailed(to, withdrawAmount);
         }
@@ -322,13 +318,13 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
             // Store previous values in case of revert
             uint previousTotalReceived = userTotalReceived[recipient];
             uint previousLastReceived = userLastReceived[recipient];
-            
+
             // Update statistics BEFORE external call
             userTotalReceived[recipient] += amount;
             userLastReceived[recipient] = block.timestamp;
 
             // Execute efficient ETH transfer
-            (bool success, ) = recipient.call{value: amount}("");
+            (bool success,) = recipient.call{ value: amount }("");
             if (!success) {
                 // Revert state changes if transfer fails
                 userTotalReceived[recipient] = previousTotalReceived;
@@ -352,11 +348,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
 
         // Emit bulk distribution event
         emit BulkDistribution(
-            batchId, 
-            recipientCount, 
-            totalRequired, 
-            remainingBalance, 
-            block.timestamp
+            batchId, recipientCount, totalRequired, remainingBalance, block.timestamp
         );
     }
 
@@ -443,13 +435,13 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
             // Store previous values in case of revert
             uint previousTotalReceived = userTotalReceived[recipient];
             uint previousLastReceived = userLastReceived[recipient];
-            
+
             // Update statistics BEFORE external call
             userTotalReceived[recipient] += amount;
             userLastReceived[recipient] = block.timestamp;
 
             // Execute efficient ETH transfer
-            (bool success, ) = recipient.call{value: amount}("");
+            (bool success,) = recipient.call{ value: amount }("");
             if (!success) {
                 // Revert state changes if transfer fails
                 userTotalReceived[recipient] = previousTotalReceived;
@@ -465,8 +457,6 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
             }
         }
 
-
-
         // Check balance and emit warning if needed
         uint remainingBalance = address(this).balance;
         if (remainingBalance < LOW_BALANCE_THRESHOLD) {
@@ -475,11 +465,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
 
         // Emit bulk distribution event
         emit BulkDistribution(
-            batchId, 
-            recipientCount, 
-            totalRequired, 
-            remainingBalance, 
-            block.timestamp
+            batchId, recipientCount, totalRequired, remainingBalance, block.timestamp
         );
     }
 
@@ -534,11 +520,11 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
     {
         uint currentDay = block.timestamp / 86400;
         uint balance = address(this).balance;
-        
+
         return (
-            totalDistributed, 
-            totalDistributions, 
-            dailyDistributions[currentDay], 
+            totalDistributed,
+            totalDistributions,
+            dailyDistributions[currentDay],
             balance,
             balance < LOW_BALANCE_THRESHOLD,
             antiDuplicateMode
@@ -642,20 +628,20 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
      * @notice Adds or removes an address from the blacklist
      * @param account Address to be blacklisted or unblacklisted
      * @param isBlacklisted True to blacklist, false to unblacklist
-     * 
+     *
      * Requirements:
      * - Caller must have DEFAULT_ADMIN_ROLE
      * - Account must not be zero address
-     * 
+     *
      * Emits:
      * - BlacklistUpdated event
      */
-    function setBlacklisted(address account, bool isBlacklisted) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
+    function setBlacklisted(address account, bool isBlacklisted)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
     {
         require(account != address(0), "Cannot blacklist zero address");
-        
+
         blacklisted[account] = isBlacklisted;
         emit BlacklistUpdated(account, isBlacklisted);
     }
@@ -664,20 +650,20 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
      * @notice Authorizes or deauthorizes an address for emergency withdrawals
      * @param account Address to be authorized or deauthorized
      * @param isAuthorized True to authorize, false to deauthorize
-     * 
+     *
      * Requirements:
      * - Caller must have DEFAULT_ADMIN_ROLE
      * - Account must not be zero address
-     * 
+     *
      * Emits:
      * - EmergencyRecipientUpdated event
      */
-    function setEmergencyRecipient(address account, bool isAuthorized) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
+    function setEmergencyRecipient(address account, bool isAuthorized)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
     {
         require(account != address(0), "Cannot authorize zero address");
-        
+
         authorizedEmergencyRecipients[account] = isAuthorized;
         emit EmergencyRecipientUpdated(account, isAuthorized);
     }
@@ -686,25 +672,25 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
      * @notice Batch operation to set multiple addresses as blacklisted/unblacklisted
      * @param accounts Array of addresses to update
      * @param isBlacklisted True to blacklist, false to unblacklist
-     * 
+     *
      * Requirements:
      * - Caller must have DEFAULT_ADMIN_ROLE
      * - Arrays must not be empty and not exceed MAX_BATCH_SIZE
-     * 
+     *
      * Emits:
      * - BlacklistUpdated event for each address
      */
-    function batchSetBlacklisted(address[] calldata accounts, bool isBlacklisted) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
+    function batchSetBlacklisted(address[] calldata accounts, bool isBlacklisted)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
     {
         uint length = accounts.length;
         require(length > 0 && length <= MAX_BATCH_SIZE, "Invalid batch size");
-        
+
         for (uint i = 0; i < length; i++) {
             address account = accounts[i];
             require(account != address(0), "Cannot blacklist zero address");
-            
+
             blacklisted[account] = isBlacklisted;
             emit BlacklistUpdated(account, isBlacklisted);
         }
@@ -714,27 +700,27 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
      * @notice Batch operation to set multiple addresses as emergency recipients
      * @param accounts Array of addresses to update
      * @param isAuthorized True to authorize, false to deauthorize
-     * 
+     *
      * Requirements:
      * - Caller must have DEFAULT_ADMIN_ROLE
      * - Arrays must not be empty and not exceed MAX_BATCH_SIZE
-     * 
+     *
      * Emits:
      * - EmergencyRecipientUpdated event for each address
      */
-    function batchSetEmergencyRecipients(address[] calldata accounts, bool isAuthorized) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
+    function batchSetEmergencyRecipients(address[] calldata accounts, bool isAuthorized)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
     {
         uint length = accounts.length;
         require(length > 0 && length <= MAX_BATCH_SIZE, "Invalid batch size");
-        
+
         for (uint i = 0; i < length; i++) {
             address account = accounts[i];
             require(account != address(0), "Cannot authorize zero address");
-            
+
             authorizedEmergencyRecipients[account] = isAuthorized;
             emit EmergencyRecipientUpdated(account, isAuthorized);
         }
     }
-} 
+}
