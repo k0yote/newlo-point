@@ -16,7 +16,7 @@ contract DeployMultiTokenDistribution is Script {
     /* ═══════════════════════════════════════════════════════════════════════
                             SONEIUM MAINNET ADDRESSES
     ═══════════════════════════════════════════════════════════════════════ */
-    
+
     address public constant SONEIUM_WETH = 0x4200000000000000000000000000000000000006;
     address public constant SONEIUM_USDT = 0x3A337a6adA9d885b6Ad95ec48F9b75f197b5AE35;
     address public constant SONEIUM_USDC = 0xbA9986D2381edf1DA03B0B9c1f8b00dc4AacC369;
@@ -27,7 +27,7 @@ contract DeployMultiTokenDistribution is Script {
     /* ═══════════════════════════════════════════════════════════════════════
                             SONEIUM MINATO ADDRESSES
     ═══════════════════════════════════════════════════════════════════════ */
-    
+
     address public constant MINATO_WETH = 0x4200000000000000000000000000000000000006;
     address public constant MINATO_USDC = 0xE9A198d38483aD727ABC8b0B1e16B2d338CF0391;
     address public constant MINATO_WSTETH = 0x5717D6A621aA104b0b4cAd32BFe6AD3b659f269E;
@@ -38,9 +38,9 @@ contract DeployMultiTokenDistribution is Script {
 
     function run() external {
         // Get deployer information
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        
+
         console.log("Deployer address:", deployer);
         console.log("Deployer balance:", deployer.balance);
 
@@ -49,11 +49,11 @@ contract DeployMultiTokenDistribution is Script {
 
         // Deploy MultiTokenDistribution
         MultiTokenDistribution distribution = new MultiTokenDistribution(deployer);
-        
+
         console.log("MultiTokenDistribution deployed at:", address(distribution));
 
         // Setup initial tokens based on chain ID
-        uint256 chainId = block.chainid;
+        uint chainId = block.chainid;
         console.log("Chain ID:", chainId);
 
         if (chainId == 1868) {
@@ -134,29 +134,41 @@ contract DeployMultiTokenDistribution is Script {
         // Log supported tokens
         string[] memory symbols = distribution.getAllTokenSymbols();
         console.log("\nSupported Tokens:");
-        for (uint256 i = 0; i < symbols.length; i++) {
-            (address tokenAddress, uint8 decimals, bool isActive, uint256 totalDistributed, uint256 totalUsers) = 
-                distribution.supportedTokens(symbols[i]);
-            
+        for (uint i = 0; i < symbols.length; i++) {
+            (
+                address tokenAddress,
+                uint8 decimals,
+                bool isActive,
+                uint totalDistributed,
+                uint totalUsers
+            ) = distribution.supportedTokens(symbols[i]);
+
             console.log(
-                string(abi.encodePacked(
-                    "  ", symbols[i], 
-                    " (", _addressToString(tokenAddress), ")",
-                    " - Decimals: ", _uint8ToString(decimals),
-                    " - Active: ", isActive ? "true" : "false"
-                ))
+                string(
+                    abi.encodePacked(
+                        "  ",
+                        symbols[i],
+                        " (",
+                        _addressToString(tokenAddress),
+                        ")",
+                        " - Decimals: ",
+                        _uint8ToString(decimals),
+                        " - Active: ",
+                        isActive ? "true" : "false"
+                    )
+                )
             );
         }
         console.log("========================\n");
     }
 
     function _addressToString(address addr) internal pure returns (string memory) {
-        bytes32 value = bytes32(uint256(uint160(addr)));
+        bytes32 value = bytes32(uint(uint160(addr)));
         bytes memory alphabet = "0123456789abcdef";
         bytes memory str = new bytes(42);
-        str[0] = '0';
-        str[1] = 'x';
-        for (uint256 i = 0; i < 20; i++) {
+        str[0] = "0";
+        str[1] = "x";
+        for (uint i = 0; i < 20; i++) {
             str[2 + i * 2] = alphabet[uint8(value[i + 12] >> 4)];
             str[3 + i * 2] = alphabet[uint8(value[i + 12] & 0x0f)];
         }
@@ -191,18 +203,18 @@ contract DeployMultiTokenDistribution is Script {
  */
 contract DeployMultiTokenDistributionOnly is Script {
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        
+
         console.log("Deployer address:", deployer);
         console.log("Deployer balance:", deployer.balance);
 
         vm.startBroadcast(deployerPrivateKey);
-        
+
         MultiTokenDistribution distribution = new MultiTokenDistribution(deployer);
-        
+
         console.log("MultiTokenDistribution deployed at:", address(distribution));
-        
+
         vm.stopBroadcast();
     }
 }
@@ -213,11 +225,11 @@ contract DeployMultiTokenDistributionOnly is Script {
  */
 contract SetupTokensScript is Script {
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address distributionAddress = vm.envAddress("DISTRIBUTION_ADDRESS");
-        
+
         MultiTokenDistribution distribution = MultiTokenDistribution(distributionAddress);
-        
+
         console.log("Setting up tokens for contract at:", distributionAddress);
         console.log("Chain ID:", block.chainid);
 
@@ -248,4 +260,4 @@ contract SetupTokensScript is Script {
         distribution.addToken("USDC", 0xE9A198d38483aD727ABC8b0B1e16B2d338CF0391, 6);
         distribution.addToken("wstETH", 0x5717D6A621aA104b0b4cAd32BFe6AD3b659f269E, 18);
     }
-} 
+}

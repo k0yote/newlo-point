@@ -38,18 +38,18 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
 
     /// @notice Token configuration and statistics
     struct TokenInfo {
-        address tokenAddress;      // ERC20 token contract address
-        uint8 decimals;           // Token decimals for display purposes
-        bool isActive;            // Whether token is currently supported
-        uint256 totalDistributed; // Total amount distributed to all users
-        uint256 totalUsers;       // Number of unique users who received this token
+        address tokenAddress; // ERC20 token contract address
+        uint8 decimals; // Token decimals for display purposes
+        bool isActive; // Whether token is currently supported
+        uint totalDistributed; // Total amount distributed to all users
+        uint totalUsers; // Number of unique users who received this token
     }
 
     /// @notice Distribution record for tracking individual distributions
     struct DistributionRecord {
-        uint256 amount;           // Amount distributed
-        uint256 timestamp;        // When the distribution occurred
-        string tokenSymbol;       // Token symbol for this distribution
+        uint amount; // Amount distributed
+        uint timestamp; // When the distribution occurred
+        string tokenSymbol; // Token symbol for this distribution
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -60,7 +60,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
     mapping(string => TokenInfo) public supportedTokens;
 
     /// @notice Mapping of user addresses to token symbols to total received amounts
-    mapping(address => mapping(string => uint256)) public userReceivedAmounts;
+    mapping(address => mapping(string => uint)) public userReceivedAmounts;
 
     /// @notice Mapping of user addresses to their distribution history
     mapping(address => DistributionRecord[]) public userDistributionHistory;
@@ -69,10 +69,10 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
     string[] public tokenSymbols;
 
     /// @notice Total number of distributions executed
-    uint256 public totalDistributions;
+    uint public totalDistributions;
 
     /// @notice Total number of unique users who received tokens
-    uint256 public totalUsers;
+    uint public totalUsers;
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    EVENTS
@@ -86,25 +86,14 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
 
     /// @notice Emitted when tokens are distributed to a user
     event TokenDistributed(
-        address indexed user,
-        string indexed symbol,
-        uint256 amount,
-        uint256 timestamp
+        address indexed user, string indexed symbol, uint amount, uint timestamp
     );
 
     /// @notice Emitted when tokens are distributed to multiple users
-    event BatchDistributionCompleted(
-        string indexed symbol,
-        uint256 totalAmount,
-        uint256 userCount
-    );
+    event BatchDistributionCompleted(string indexed symbol, uint totalAmount, uint userCount);
 
     /// @notice Emitted when emergency withdrawal is executed
-    event EmergencyWithdraw(
-        address indexed to,
-        string indexed symbol,
-        uint256 amount
-    );
+    event EmergencyWithdraw(address indexed to, string indexed symbol, uint amount);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
@@ -115,10 +104,10 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
     error TokenNotActive(string symbol);
     error InvalidTokenAddress(address tokenAddress);
     error InvalidUser(address user);
-    error InvalidAmount(uint256 amount);
+    error InvalidAmount(uint amount);
     error InvalidSymbol(string symbol);
-    error InsufficientBalance(string symbol, uint256 required, uint256 available);
-    error InvalidArrayLength(uint256 usersLength, uint256 amountsLength);
+    error InsufficientBalance(string symbol, uint required, uint available);
+    error InvalidArrayLength(uint usersLength, uint amountsLength);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -151,11 +140,10 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * Emits:
      * - TokenAdded event
      */
-    function addToken(
-        string memory symbol,
-        address tokenAddress,
-        uint8 decimals
-    ) external onlyOwner {
+    function addToken(string memory symbol, address tokenAddress, uint8 decimals)
+        external
+        onlyOwner
+    {
         if (bytes(symbol).length == 0) {
             revert InvalidSymbol(symbol);
         }
@@ -220,18 +208,19 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * Emits:
      * - TokenDistributed event
      */
-    function distributeToken(
-        string memory symbol,
-        address to,
-        uint256 amount
-    ) external onlyOwner nonReentrant whenNotPaused {
+    function distributeToken(string memory symbol, address to, uint amount)
+        external
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
         _validateDistribution(symbol, to, amount);
 
         TokenInfo storage token = supportedTokens[symbol];
         IERC20 tokenContract = IERC20(token.tokenAddress);
 
         // Check contract balance
-        uint256 balance = tokenContract.balanceOf(address(this));
+        uint balance = tokenContract.balanceOf(address(this));
         if (balance < amount) {
             revert InsufficientBalance(symbol, amount, balance);
         }
@@ -251,11 +240,9 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
         totalDistributions++;
 
         // Add to user's distribution history
-        userDistributionHistory[to].push(DistributionRecord({
-            amount: amount,
-            timestamp: block.timestamp,
-            tokenSymbol: symbol
-        }));
+        userDistributionHistory[to].push(
+            DistributionRecord({ amount: amount, timestamp: block.timestamp, tokenSymbol: symbol })
+        );
 
         // Transfer tokens
         tokenContract.safeTransfer(to, amount);
@@ -285,7 +272,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
     function batchDistributeToken(
         string memory symbol,
         address[] calldata users,
-        uint256[] calldata amounts
+        uint[] calldata amounts
     ) external onlyOwner nonReentrant whenNotPaused {
         if (users.length != amounts.length) {
             revert InvalidArrayLength(users.length, amounts.length);
@@ -301,24 +288,24 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
         IERC20 tokenContract = IERC20(token.tokenAddress);
 
         // Calculate total amount needed
-        uint256 totalAmount = 0;
-        for (uint256 i = 0; i < amounts.length; i++) {
+        uint totalAmount = 0;
+        for (uint i = 0; i < amounts.length; i++) {
             totalAmount += amounts[i];
         }
 
         // Check contract balance
-        uint256 balance = tokenContract.balanceOf(address(this));
+        uint balance = tokenContract.balanceOf(address(this));
         if (balance < totalAmount) {
             revert InsufficientBalance(symbol, totalAmount, balance);
         }
 
         // Cache variables to optimize gas usage in loop
-        uint256 currentTime = block.timestamp;
-        uint256 newTotalUsers = 0;
-        uint256 usersLength = users.length;
+        uint currentTime = block.timestamp;
+        uint newTotalUsers = 0;
+        uint usersLength = users.length;
 
         // Execute distributions
-        for (uint256 i = 0; i < usersLength; i++) {
+        for (uint i = 0; i < usersLength; i++) {
             if (users[i] == address(0)) {
                 revert InvalidUser(users[i]);
             }
@@ -339,11 +326,13 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
             userReceivedAmounts[users[i]][symbol] += amounts[i];
 
             // Add to user's distribution history
-            userDistributionHistory[users[i]].push(DistributionRecord({
-                amount: amounts[i],
-                timestamp: currentTime,
-                tokenSymbol: symbol
-            }));
+            userDistributionHistory[users[i]].push(
+                DistributionRecord({
+                    amount: amounts[i],
+                    timestamp: currentTime,
+                    tokenSymbol: symbol
+                })
+            );
 
             // Transfer tokens
             tokenContract.safeTransfer(users[i], amounts[i]);
@@ -375,11 +364,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * Emits:
      * - EmergencyWithdraw event
      */
-    function emergencyWithdraw(
-        string memory symbol,
-        address to,
-        uint256 amount
-    ) external onlyOwner {
+    function emergencyWithdraw(string memory symbol, address to, uint amount) external onlyOwner {
         if (supportedTokens[symbol].tokenAddress == address(0)) {
             revert TokenNotSupported(symbol);
         }
@@ -388,7 +373,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
         }
 
         IERC20 tokenContract = IERC20(supportedTokens[symbol].tokenAddress);
-        uint256 balance = tokenContract.balanceOf(address(this));
+        uint balance = tokenContract.balanceOf(address(this));
 
         if (amount == 0) {
             amount = balance;
@@ -424,7 +409,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @notice Get the number of supported tokens
      * @return Number of supported tokens
      */
-    function getTokenCount() external view returns (uint256) {
+    function getTokenCount() external view returns (uint) {
         return tokenSymbols.length;
     }
 
@@ -441,7 +426,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param symbol Token symbol
      * @return Token balance
      */
-    function getTokenBalance(string memory symbol) external view returns (uint256) {
+    function getTokenBalance(string memory symbol) external view returns (uint) {
         if (supportedTokens[symbol].tokenAddress == address(0)) {
             revert TokenNotSupported(symbol);
         }
@@ -453,7 +438,11 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param user User address
      * @return Array of distribution records
      */
-    function getUserDistributionHistory(address user) external view returns (DistributionRecord[] memory) {
+    function getUserDistributionHistory(address user)
+        external
+        view
+        returns (DistributionRecord[] memory)
+    {
         return userDistributionHistory[user];
     }
 
@@ -463,12 +452,16 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param symbol Token symbol
      * @return Array of distribution records for the specified token
      */
-    function getUserTokenHistory(address user, string memory symbol) external view returns (DistributionRecord[] memory) {
+    function getUserTokenHistory(address user, string memory symbol)
+        external
+        view
+        returns (DistributionRecord[] memory)
+    {
         DistributionRecord[] memory allHistory = userDistributionHistory[user];
-        uint256 count = 0;
+        uint count = 0;
 
         // Count matching records
-        for (uint256 i = 0; i < allHistory.length; i++) {
+        for (uint i = 0; i < allHistory.length; i++) {
             if (keccak256(bytes(allHistory[i].tokenSymbol)) == keccak256(bytes(symbol))) {
                 count++;
             }
@@ -476,8 +469,8 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
 
         // Create filtered array
         DistributionRecord[] memory filteredHistory = new DistributionRecord[](count);
-        uint256 index = 0;
-        for (uint256 i = 0; i < allHistory.length; i++) {
+        uint index = 0;
+        for (uint i = 0; i < allHistory.length; i++) {
             if (keccak256(bytes(allHistory[i].tokenSymbol)) == keccak256(bytes(symbol))) {
                 filteredHistory[index] = allHistory[i];
                 index++;
@@ -497,7 +490,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param to Recipient address
      * @param amount Amount to distribute
      */
-    function _validateDistribution(string memory symbol, address to, uint256 amount) internal view {
+    function _validateDistribution(string memory symbol, address to, uint amount) internal view {
         if (supportedTokens[symbol].tokenAddress == address(0)) {
             revert TokenNotSupported(symbol);
         }
@@ -518,12 +511,12 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @return True if user has never received any tokens before
      */
     function _isFirstTimeUser(address user) internal view returns (bool) {
-        uint256 symbolsLength = tokenSymbols.length;
-        for (uint256 i = 0; i < symbolsLength; i++) {
+        uint symbolsLength = tokenSymbols.length;
+        for (uint i = 0; i < symbolsLength; i++) {
             if (userReceivedAmounts[user][tokenSymbols[i]] > 0) {
                 return false;
             }
         }
         return true;
     }
-} 
+}
