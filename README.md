@@ -113,7 +113,7 @@ graph TD
 |----------|---------|-------------|
 | **NewLoPointFactory** | [`0x724BD28750E399B5147fAae1D8AE2966564A158E`](https://soneium-minato.blockscout.com/address/0x724BD28750E399B5147fAae1D8AE2966564A158E) | Factory contract for deterministic deployment |
 | **NewLoPoint** | [`0x7EaAF718783C2d08eFa1a20E0dd5B7Fb632fE9eF`](https://soneium-minato.blockscout.com/address/0x7EaAF718783C2d08eFa1a20E0dd5B7Fb632fE9eF) | Main ERC20 token contract with gradual transfer controls |
-| **TokenDistributionV2** | [`0x25b0Ff823a0C41A75060f51a31B6ED5d7eD49883`](https://soneium-minato.blockscout.com/address/0x25b0Ff823a0C41A75060f51a31B6ED5d7eD49883) | Ultra-efficient bulk distribution contract (92% gas savings) |
+| **TokenDistributionV2** | [`0xe2628c538f1da5f825f1a693A166b818f3881266`](https://soneium-minato.blockscout.com/address/0x25b0Ff823a0C41A75060f51a31B6ED5d7eD49883) | Ultra-efficient bulk distribution contract (92% gas savings) |
 
 #### Network Information
 - **Network**: Soneium Minato Testnet
