@@ -6,6 +6,7 @@ import { NewLoPointFactory } from "../src/NewLoPointFactory.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { TokenDistributionV2 } from "../src/TokenDistributionV2.sol";
 import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
+import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
 
 /**
  * @title DeployLocalScenario
@@ -16,8 +17,9 @@ import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
  *      2. NewLoPointをデプロイ
  *      3. TokenDistributionV2をデプロイ
  *      4. MultiTokenDistributionをデプロイ
- *      5. NewLoPointの設定（whitelist、transfer control）
- *      6. トークンの付与とロール設定
+ *      5. Mock tokens（USDC、USDT、WETH）をデプロイ
+ *      6. NewLoPointの設定（whitelist、transfer control）
+ *      7. トークンの付与とロール設定
  *
  * @dev 使用方法:
  *      forge script script/DeployLocalScenario.s.sol:DeployLocalScenario --fork-url http://localhost:8545 --broadcast
@@ -34,6 +36,11 @@ contract DeployLocalScenario is Script {
     NewLoPoint public nlpToken;
     TokenDistributionV2 public tokenDistV2;
     MultiTokenDistribution public multiTokenDist;
+
+    // Mock tokens
+    ERC20DecimalsWithMint public usdcToken;
+    ERC20DecimalsWithMint public usdtToken;
+    ERC20DecimalsWithMint public wethToken;
 
     function run() external {
         console.log("=== LOCAL SCENARIO DEPLOYMENT ===");
@@ -61,10 +68,13 @@ contract DeployLocalScenario is Script {
         // 4. MultiTokenDistributionをデプロイ
         _deployMultiTokenDistribution();
 
-        // 5. NewLoPointの設定
+        // 5. Mock tokensをデプロイ
+        _deployMockTokens();
+
+        // 6. NewLoPointの設定
         _configureNewLoPoint();
 
-        // 6. トークンの付与とロール設定
+        // 7. トークンの付与とロール設定
         _setupTokensAndRoles();
 
         vm.stopBroadcast();
@@ -117,6 +127,31 @@ contract DeployLocalScenario is Script {
 
         console.log("MultiTokenDistribution deployed at:", address(multiTokenDist));
         console.log("Owner:", multiTokenDist.owner());
+    }
+
+    function _deployMockTokens() internal {
+        console.log("\n=== DEPLOYING MOCK TOKENS ===");
+
+        // Deploy USDC mock token
+        usdcToken = new ERC20DecimalsWithMint("USD Coin", "USDC", 6);
+        console.log("USDC deployed at:", address(usdcToken));
+        console.log("USDC name:", usdcToken.name());
+        console.log("USDC symbol:", usdcToken.symbol());
+        console.log("USDC decimals:", usdcToken.decimals());
+
+        // Deploy USDT mock token
+        usdtToken = new ERC20DecimalsWithMint("Tether USD", "USDT", 6);
+        console.log("USDT deployed at:", address(usdtToken));
+        console.log("USDT name:", usdtToken.name());
+        console.log("USDT symbol:", usdtToken.symbol());
+        console.log("USDT decimals:", usdtToken.decimals());
+
+        // Deploy WETH mock token
+        wethToken = new ERC20DecimalsWithMint("Wrapped Ether", "WETH", 18);
+        console.log("WETH deployed at:", address(wethToken));
+        console.log("WETH name:", wethToken.name());
+        console.log("WETH symbol:", wethToken.symbol());
+        console.log("WETH decimals:", wethToken.decimals());
     }
 
     function _configureNewLoPoint() internal {
@@ -193,6 +228,9 @@ contract DeployLocalScenario is Script {
         console.log("NewLoPoint:", address(nlpToken));
         console.log("TokenDistributionV2:", address(tokenDistV2));
         console.log("MultiTokenDistribution:", address(multiTokenDist));
+        console.log("USDC Mock Token:", address(usdcToken));
+        console.log("USDT Mock Token:", address(usdtToken));
+        console.log("WETH Mock Token:", address(wethToken));
 
         console.log("\n=== NEWLOPOINT STATUS ===");
         console.log("Name:", nlpToken.name());
@@ -218,6 +256,14 @@ contract DeployLocalScenario is Script {
             tokenDistV2.hasRole(tokenDistV2.DISTRIBUTOR_ROLE(), ADMIN)
         );
 
+        console.log("\n=== MOCK TOKENS INFO ===");
+        console.log("USDC:", address(usdcToken));
+        console.log("USDT:", address(usdtToken));
+        console.log("WETH:", address(wethToken));
+        console.log("USDC Supply:", usdcToken.totalSupply());
+        console.log("USDT Supply:", usdtToken.totalSupply());
+        console.log("WETH Supply:", wethToken.totalSupply());
+
         console.log("\n=== USEFUL CAST COMMANDS ===");
         console.log("Grant MINTER_ROLE to address:");
         console.log(
@@ -233,6 +279,17 @@ contract DeployLocalScenario is Script {
         console.log(
             "cast send [NLP_TOKEN] \"setWhitelistedAddress(address,bool)\" [ADDRESS] true --private-key [ADMIN_KEY]"
         );
+
+        console.log("\nMint mock tokens (USDC/USDT/WETH):");
+        console.log(
+            "cast send [TOKEN_ADDRESS] \"mint(address,uint256)\" [ADDRESS] [AMOUNT] --private-key [PRIVATE_KEY]"
+        );
+        console.log(
+            "Example USDC mint: cast send",
+            address(usdcToken),
+            "\"mint(address,uint256)\" [ADDRESS] \"1000000000\" --private-key [PRIVATE_KEY]"
+        );
+        console.log("# The above command mints 1000 USDC (6 decimals)");
 
         console.log("\n=== ANVIL ACCOUNTS ===");
         console.log("Account[0] (Deployer):", DEPLOYER);
