@@ -545,24 +545,71 @@ contract NLPToMultiTokenExchangeTest is Test {
 
     function testEmergencyWithdrawETH() public {
         uint withdrawAmount = 1 ether;
-        address to = address(0x99);
-        uint balanceBefore = to.balance;
+
+        // Set treasury first
+        vm.prank(owner);
+        exchange.setTreasury(address(0x99));
+
+        // Pause the contract
+        vm.prank(emergencyManager);
+        exchange.pause();
+
+        uint balanceBefore = address(0x99).balance;
 
         vm.prank(emergencyManager);
-        exchange.emergencyWithdrawETH(payable(to), withdrawAmount);
+        exchange.emergencyWithdrawETH(withdrawAmount);
 
-        assertEq(to.balance, balanceBefore + withdrawAmount);
+        assertEq(address(0x99).balance, balanceBefore + withdrawAmount);
     }
 
     function testEmergencyWithdrawToken() public {
         uint withdrawAmount = 1000 * 10 ** 6; // 1000 USDC
-        address to = address(0x99);
-        uint balanceBefore = usdcToken.balanceOf(to);
+        address treasuryAddr = address(0x99);
+
+        // Set treasury first
+        vm.prank(owner);
+        exchange.setTreasury(treasuryAddr);
+
+        // Pause the contract
+        vm.prank(emergencyManager);
+        exchange.pause();
+
+        uint balanceBefore = usdcToken.balanceOf(treasuryAddr);
 
         vm.prank(emergencyManager);
-        exchange.emergencyWithdrawToken(NLPToMultiTokenExchange.TokenType.USDC, to, withdrawAmount);
+        exchange.emergencyWithdrawToken(NLPToMultiTokenExchange.TokenType.USDC, withdrawAmount);
 
-        assertEq(usdcToken.balanceOf(to), balanceBefore + withdrawAmount);
+        assertEq(usdcToken.balanceOf(treasuryAddr), balanceBefore + withdrawAmount);
+    }
+
+    function testSetTreasury() public {
+        address newTreasury = address(0x99);
+
+        vm.prank(owner);
+        exchange.setTreasury(newTreasury);
+
+        assertEq(exchange.treasury(), newTreasury);
+    }
+
+    function testSetTreasuryOnlyAdmin() public {
+        vm.prank(configManager);
+        vm.expectRevert();
+        exchange.setTreasury(address(0x99));
+    }
+
+    function testSetTreasuryZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        exchange.setTreasury(address(0));
+    }
+
+    function testEmergencyWithdrawWithoutTreasury() public {
+        vm.prank(emergencyManager);
+        exchange.pause();
+
+        vm.prank(emergencyManager);
+        vm.expectRevert("Treasury not set");
+        exchange.emergencyWithdrawETH(1 ether);
     }
 
     function testTokenEnableDisable() public {
@@ -687,8 +734,17 @@ contract NLPToMultiTokenExchangeTest is Test {
 
     function testInsufficientBalance() public {
         // Empty the contract
+        vm.prank(owner);
+        exchange.setTreasury(owner);
+
         vm.prank(emergencyManager);
-        exchange.emergencyWithdrawETH(payable(owner), 0);
+        exchange.pause();
+
+        vm.prank(emergencyManager);
+        exchange.emergencyWithdrawETH(0);
+
+        vm.prank(emergencyManager);
+        exchange.unpause();
 
         uint nlpAmount = 1000 * 10 ** 18;
         vm.startPrank(user);

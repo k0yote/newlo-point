@@ -4,6 +4,8 @@ pragma solidity ^0.8.27;
 import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { AggregatorV3Interface } from
     "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
@@ -123,6 +125,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice Whether JPY/USD oracle is available
     bool public immutable hasJpyOracle;
 
+    /// @notice Treasury address for emergency withdrawals
+    address public treasury;
+
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTANTS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -230,6 +235,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Emitted when emergency withdrawal is executed
     event EmergencyWithdraw(TokenType indexed tokenType, address indexed to, uint amount);
+
+    /// @notice Emitted when treasury address is updated
+    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
@@ -645,29 +653,34 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         // Calculate net amount in USD terms
         uint netAmountInUSD = grossAmountInUSD - exchangeFeeInUSD - operationalFeeInUSD;
 
-        // Convert to target token amount
-        uint tokenAmountBeforeFee = grossAmountInUSD / tokenUsdPrice;
-        uint tokenAmountAfterFee = netAmountInUSD / tokenUsdPrice;
+        // Convert to target token amount with proper decimal adjustment
+        uint tokenAmountBeforeFee;
+        uint tokenAmountAfterFee;
+        uint exchangeFee;
+        uint operationalFee;
 
-        // Calculate fees in token terms for tracking
-        uint exchangeFee = exchangeFeeInUSD / tokenUsdPrice;
-        uint operationalFee = operationalFeeInUSD / tokenUsdPrice;
-
-        // Adjust for token decimals
+        // Adjust for token decimals before division to maintain precision
         if (config.decimals != 18) {
             if (config.decimals < 18) {
                 uint decimalAdjustment = 10 ** (18 - config.decimals);
-                tokenAmountBeforeFee = tokenAmountBeforeFee / decimalAdjustment;
-                tokenAmountAfterFee = tokenAmountAfterFee / decimalAdjustment;
-                exchangeFee = exchangeFee / decimalAdjustment;
-                operationalFee = operationalFee / decimalAdjustment;
+                tokenAmountBeforeFee = grossAmountInUSD / (tokenUsdPrice * decimalAdjustment);
+                tokenAmountAfterFee = netAmountInUSD / (tokenUsdPrice * decimalAdjustment);
+                exchangeFee = Math.mulDiv(exchangeFeeInUSD, 1, tokenUsdPrice * decimalAdjustment);
+                operationalFee =
+                    Math.mulDiv(operationalFeeInUSD, 1, tokenUsdPrice * decimalAdjustment);
             } else {
                 uint decimalAdjustment = 10 ** (config.decimals - 18);
-                tokenAmountBeforeFee = tokenAmountBeforeFee * decimalAdjustment;
-                tokenAmountAfterFee = tokenAmountAfterFee * decimalAdjustment;
-                exchangeFee = exchangeFee * decimalAdjustment;
-                operationalFee = operationalFee * decimalAdjustment;
+                tokenAmountBeforeFee =
+                    Math.mulDiv(grossAmountInUSD, decimalAdjustment, tokenUsdPrice);
+                tokenAmountAfterFee = Math.mulDiv(netAmountInUSD, decimalAdjustment, tokenUsdPrice);
+                exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, tokenUsdPrice);
+                operationalFee = Math.mulDiv(operationalFeeInUSD, decimalAdjustment, tokenUsdPrice);
             }
+        } else {
+            tokenAmountBeforeFee = grossAmountInUSD / tokenUsdPrice;
+            tokenAmountAfterFee = netAmountInUSD / tokenUsdPrice;
+            exchangeFee = exchangeFeeInUSD / tokenUsdPrice;
+            operationalFee = operationalFeeInUSD / tokenUsdPrice;
         }
 
         // Check balance
@@ -920,29 +933,33 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                 // Calculate net amount in USD terms
                 uint netAmountInUSD = grossAmountInUSD - exchangeFeeInUSD - operationalFeeInUSD;
 
-                // Convert to target token amount
-                uint tokenAmountBeforeFee = grossAmountInUSD / tokenUsdRate;
-                tokenAmount = netAmountInUSD / tokenUsdRate;
+                // Convert to target token amount with proper decimal adjustment
+                uint tokenAmountBeforeFee;
 
-                // Calculate fees in token terms for return values
-                exchangeFee = exchangeFeeInUSD / tokenUsdRate;
-                operationalFee = operationalFeeInUSD / tokenUsdRate;
-
-                // Adjust for token decimals
+                // Adjust for token decimals before division to maintain precision
                 if (config.decimals != 18) {
                     if (config.decimals < 18) {
                         uint decimalAdjustment = 10 ** (18 - config.decimals);
-                        tokenAmountBeforeFee = tokenAmountBeforeFee / decimalAdjustment;
-                        tokenAmount = tokenAmount / decimalAdjustment;
-                        exchangeFee = exchangeFee / decimalAdjustment;
-                        operationalFee = operationalFee / decimalAdjustment;
+                        tokenAmountBeforeFee = grossAmountInUSD / (tokenUsdRate * decimalAdjustment);
+                        tokenAmount = netAmountInUSD / (tokenUsdRate * decimalAdjustment);
+                        exchangeFee =
+                            Math.mulDiv(exchangeFeeInUSD, 1, tokenUsdRate * decimalAdjustment);
+                        operationalFee =
+                            Math.mulDiv(operationalFeeInUSD, 1, tokenUsdRate * decimalAdjustment);
                     } else {
                         uint decimalAdjustment = 10 ** (config.decimals - 18);
-                        tokenAmountBeforeFee = tokenAmountBeforeFee * decimalAdjustment;
-                        tokenAmount = tokenAmount * decimalAdjustment;
-                        exchangeFee = exchangeFee * decimalAdjustment;
-                        operationalFee = operationalFee * decimalAdjustment;
+                        tokenAmountBeforeFee =
+                            Math.mulDiv(grossAmountInUSD, decimalAdjustment, tokenUsdRate);
+                        tokenAmount = Math.mulDiv(netAmountInUSD, decimalAdjustment, tokenUsdRate);
+                        exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, tokenUsdRate);
+                        operationalFee =
+                            Math.mulDiv(operationalFeeInUSD, decimalAdjustment, tokenUsdRate);
                     }
+                } else {
+                    tokenAmountBeforeFee = grossAmountInUSD / tokenUsdRate;
+                    tokenAmount = netAmountInUSD / tokenUsdRate;
+                    exchangeFee = exchangeFeeInUSD / tokenUsdRate;
+                    operationalFee = operationalFeeInUSD / tokenUsdRate;
                 }
             } catch {
                 return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
@@ -1033,48 +1050,66 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Emergency withdrawal of ETH
-     * @param to Withdrawal destination
+     * @notice Emergency withdrawal of ETH to treasury
      * @param amount Amount to withdraw (0 for all)
      */
-    function emergencyWithdrawETH(address payable to, uint amount)
+    function emergencyWithdrawETH(uint amount)
         external
+        whenPaused
+        nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(to != address(0), "Invalid address");
+        require(treasury != address(0), "Treasury not set");
 
-        uint withdrawAmount = amount == 0 ? address(this).balance : amount;
-        require(withdrawAmount <= address(this).balance, "Insufficient balance");
+        uint balance = address(this).balance;
+        uint withdrawAmount = amount == 0 ? balance : amount;
 
-        emit EmergencyWithdraw(TokenType.ETH, to, withdrawAmount);
+        if (withdrawAmount > balance) {
+            revert InsufficientBalance(TokenType.ETH, withdrawAmount, balance);
+        }
 
-        (bool sent,) = to.call{ value: withdrawAmount }("");
-        require(sent, "ETH transfer failed");
+        emit EmergencyWithdraw(TokenType.ETH, treasury, withdrawAmount);
+        Address.sendValue(payable(treasury), withdrawAmount);
     }
 
     /**
-     * @notice Emergency withdrawal of tokens
+     * @notice Emergency withdrawal of tokens to treasury
      * @param tokenType Token type to withdraw
-     * @param to Withdrawal destination
      * @param amount Amount to withdraw (0 for all)
      */
-    function emergencyWithdrawToken(TokenType tokenType, address to, uint amount)
+    function emergencyWithdrawToken(TokenType tokenType, uint amount)
         external
+        whenPaused
+        nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(to != address(0), "Invalid address");
+        require(treasury != address(0), "Treasury not set");
         require(tokenType != TokenType.ETH, "Use emergencyWithdrawETH for ETH");
 
         TokenConfig memory config = tokenConfigs[tokenType];
         require(config.tokenAddress != address(0), "Invalid token config");
 
         IERC20Extended token = IERC20Extended(config.tokenAddress);
-        uint withdrawAmount = amount == 0 ? token.balanceOf(address(this)) : amount;
-        require(withdrawAmount <= token.balanceOf(address(this)), "Insufficient balance");
+        uint balance = token.balanceOf(address(this));
+        uint withdrawAmount = amount == 0 ? balance : amount;
 
-        emit EmergencyWithdraw(tokenType, to, withdrawAmount);
+        if (withdrawAmount > balance) {
+            revert InsufficientBalance(tokenType, withdrawAmount, balance);
+        }
 
-        require(token.transfer(to, withdrawAmount), "Token transfer failed");
+        emit EmergencyWithdraw(tokenType, treasury, withdrawAmount);
+        require(token.transfer(treasury, withdrawAmount), "Token transfer failed");
+    }
+
+    /**
+     * @notice Set treasury address
+     * @param newTreasury New treasury address
+     */
+    function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newTreasury != address(0), "Treasury cannot be zero address");
+        address oldTreasury = treasury;
+        treasury = newTreasury;
+        emit TreasuryUpdated(oldTreasury, newTreasury);
     }
 
     /**
