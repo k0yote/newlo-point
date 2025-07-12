@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # GitHub Actions の依存関係を監視
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    assignees:
+      - "k0yote"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    
+  # Git submodules の依存関係を監視
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    assignees:
+      - "k0yote"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    # 特定のサブモジュールを除外したい場合は以下のように設定
+    # ignore:
+    #   - dependency-name: "forge-std"
+    #     versions: ["*"]
