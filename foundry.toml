@@ -60,8 +60,9 @@ soneium-minato-testnet = "${SONEIUM_MINATO_RPC_URL}"
 # Etherscan API keys
 [etherscan]
 mainnet = { key = "${ETHERSCAN_API_KEY}" }
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
 polygon = { key = "${POLYGONSCAN_API_KEY}" }
-#arbitrum = { key = "${ARBISCAN_API_KEY}" }
+amoy    = { key = "${POLYGONSCAN_API_KEY}" }
 # Soneium Blockscout API
 soneium = { key = "${SONEIUM_API_KEY}", url = "https://soneium.blockscout.com/api" }
 soneium-minato-testnet = { key = "${SONEIUM_API_KEY}", url = "https://soneium-minato.blockscout.com/api" }
