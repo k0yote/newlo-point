@@ -75,7 +75,7 @@ mint-tokens: ## 指定されたアドレスにトークンをミント (usage: m
 		exit 1; \
 	fi
 	@echo "Minting $(AMOUNT) tokens to $(ADDRESS)..."
-	@cast send $(NLP_TOKEN) "mint(address,uint256)" $(ADDRESS) "$(AMOUNT)000000000000000000" --private-key $(ADMIN_KEY) --rpc-url $(ANVIL_URL)
+	@cast send $(NLP_TOKEN) "mint(address,uint256)" $(ADDRESS) "$$(echo "scale=0; $(AMOUNT) * 1000000000000000000" | bc -l)" --private-key $(ADMIN_KEY) --rpc-url $(ANVIL_URL)
 
 .PHONY: add-to-whitelist
 add-to-whitelist: ## 指定されたアドレスをwhitelistに追加 (usage: make add-to-whitelist ADDRESS=0x...)

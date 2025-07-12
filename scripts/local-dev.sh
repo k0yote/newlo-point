@@ -57,10 +57,9 @@ print_info() {
 
 check_anvil_running() {
     if ! curl -s "$ANVIL_URL" -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' > /dev/null 2>&1; then
-        print_error "Anvil is not running on $ANVIL_URL"
-        print_info "Please run: ./scripts/local-dev.sh start"
-        exit 1
+        return 1
     fi
+    return 0
 }
 
 check_requirements() {
@@ -138,7 +137,11 @@ status_anvil() {
 deploy_contracts() {
     print_header "Deploying Contracts"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     print_info "Deploying all contracts to local Anvil..."
     forge script script/DeployLocalScenario.s.sol:DeployLocalScenario --fork-url "$ANVIL_URL" --broadcast --private-key "$DEPLOYER_KEY" -vvv
@@ -150,7 +153,11 @@ deploy_contracts() {
 deploy_dry_run() {
     print_header "Deployment Dry Run"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     print_info "Running deployment dry run..."
     forge script script/DeployLocalScenario.s.sol:DeployLocalScenario --fork-url "$ANVIL_URL" --private-key "$DEPLOYER_KEY" -vvv
@@ -175,7 +182,11 @@ grant_minter_role() {
 
     print_header "Granting MINTER_ROLE"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     print_info "Granting MINTER_ROLE to $address..."
     cast send "$NLP_TOKEN" "grantRole(bytes32,address)" "$MINTER_ROLE" "$address" --private-key "$ADMIN_KEY" --rpc-url "$ANVIL_URL"
@@ -201,9 +212,14 @@ mint_tokens() {
 
     print_header "Minting Tokens"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
-    local amount_wei="${amount}000000000000000000"  # Convert to wei
+    # Convert to wei using proper decimal arithmetic
+    local amount_wei=$(echo "scale=0; $amount * 1000000000000000000" | bc -l)
     print_info "Minting $amount tokens to $address..."
     cast send "$NLP_TOKEN" "mint(address,uint256)" "$address" "$amount_wei" --private-key "$ADMIN_KEY" --rpc-url "$ANVIL_URL"
 
@@ -227,7 +243,11 @@ add_to_whitelist() {
 
     print_header "Adding to Whitelist"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     print_info "Adding $address to whitelist..."
     cast send "$NLP_TOKEN" "setWhitelistedAddress(address,bool)" "$address" true --private-key "$ADMIN_KEY" --rpc-url "$ANVIL_URL"
@@ -253,7 +273,11 @@ check_balance() {
 
     print_header "Checking Balance"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     local balance=$(cast call "$NLP_TOKEN" "balanceOf(address)" "$address" --rpc-url "$ANVIL_URL" | cast to-dec)
     local balance_formatted=$(echo "scale=18; $balance / 1000000000000000000" | bc -l)
@@ -278,7 +302,11 @@ check_whitelist_status() {
 
     print_header "Checking Whitelist Status"
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        exit 1
+    fi
 
     local status=$(cast call "$NLP_TOKEN" "whitelistedAddresses(address)" "$address" --rpc-url "$ANVIL_URL")
 
@@ -298,7 +326,11 @@ contract_info() {
         return
     fi
 
-    check_anvil_running
+    if ! check_anvil_running; then
+        print_error "Anvil is not running on $ANVIL_URL"
+        print_info "Please run: ./scripts/local-dev.sh start"
+        return
+    fi
 
     local name=$(cast call "$NLP_TOKEN" "name()" --rpc-url "$ANVIL_URL" | cast to-ascii)
     local symbol=$(cast call "$NLP_TOKEN" "symbol()" --rpc-url "$ANVIL_URL" | cast to-ascii)
