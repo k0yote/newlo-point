@@ -61,7 +61,7 @@ contract MockNLPToken is ERC20DecimalsWithMint {
         return allowances[owner][spender];
     }
 
-    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+    function DOMAIN_SEPARATOR() external pure returns (bytes32) {
         return keccak256("MockDomainSeparator");
     }
 
@@ -191,7 +191,7 @@ contract NLPToMultiTokenExchangeTest is Test {
                                BASIC TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    function testInitialConfiguration() public {
+    function testInitialConfiguration() public view {
         assertEq(address(exchange.nlpToken()), address(nlpToken));
         assertEq(address(exchange.jpyUsdPriceFeed()), address(jpyUsdPriceFeed));
         assertTrue(exchange.hasJpyOracle());
@@ -202,7 +202,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(exchange.hasRole(exchange.EMERGENCY_MANAGER_ROLE(), emergencyManager));
     }
 
-    function testTokenConfiguration() public {
+    function testTokenConfiguration() public view {
         NLPToMultiTokenExchange.TokenConfig memory config =
             exchange.getTokenConfig(NLPToMultiTokenExchange.TokenType.ETH);
 
@@ -215,7 +215,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertEq(config.symbol, "ETH");
     }
 
-    function testOperationalFeeConfiguration() public {
+    function testOperationalFeeConfiguration() public view {
         NLPToMultiTokenExchange.OperationalFeeConfig memory config =
             exchange.getOperationalFeeConfig(NLPToMultiTokenExchange.TokenType.ETH);
 
@@ -642,7 +642,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(usdcReceived > 0);
     }
 
-    function testContractStatus() public {
+    function testContractStatus() public view {
         (uint ethBalance, bool isPaused, uint jpyUsdPrice,) = exchange.getContractStatus();
 
         assertEq(ethBalance, 100 ether);
