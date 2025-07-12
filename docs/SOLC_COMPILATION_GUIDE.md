@@ -21,6 +21,16 @@ solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --includ
 solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/openzeppelin-contracts-upgradeable/contracts @openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts src/NewLoPoint.sol -o solc-build
 ```
 
+```bash
+### MultiTokenDistribution
+solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/MultiTokenDistribution.sol -o solc-build
+```
+
+```bash
+### NLPToETHExchange
+solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/chainlink-evm/contracts/ @chainlink/contracts/=lib/chainlink-evm/contracts/ src/NLPToETHExchange.sol -o solc-build
+```
+
 ## Command Parameters Breakdown
 
 ### Optimization Settings
