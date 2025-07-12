@@ -123,7 +123,9 @@ contract DeployMultiTokenDistributionImproved is Script {
     function _logDeploymentSummary(MultiTokenDistribution distribution) internal view {
         console.log("\n=== DEPLOYMENT SUMMARY ===");
         console.log("Contract Address:", address(distribution));
-        console.log("Owner:", distribution.owner());
+        console.log(
+            "Deployer has ADMIN_ROLE:", distribution.hasRole(distribution.ADMIN_ROLE(), msg.sender)
+        );
         console.log("Token Count:", distribution.getTokenCount());
         console.log("Total Distributions:", distribution.totalDistributions());
         console.log("Total Users:", distribution.totalUsers());

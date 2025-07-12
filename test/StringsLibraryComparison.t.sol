@@ -34,7 +34,7 @@ contract StringsLibraryComparisonTest is Test {
     /**
      * @notice Test that both implementations produce identical results
      */
-    function testIdenticalResults() public view {
+    function testIdenticalResults() public pure {
         uint[] memory testValues = new uint[](10);
         testValues[0] = 0;
         testValues[1] = 1;
@@ -110,7 +110,7 @@ contract StringsLibraryComparisonTest is Test {
     /**
      * @notice Fuzz test to ensure both implementations always match
      */
-    function testFuzzComparison(uint value) public view {
+    function testFuzzComparison(uint value) public pure {
         string memory customResult = _uint256ToString(value);
         string memory openzeppelinResult = Strings.toString(value);
 
@@ -120,7 +120,7 @@ contract StringsLibraryComparisonTest is Test {
     /**
      * @notice Test with DeFi-specific amounts
      */
-    function testDeFiAmounts() public view {
+    function testDeFiAmounts() public pure {
         // Common DeFi amounts
         uint[] memory defiAmounts = new uint[](8);
         defiAmounts[0] = 1 * 10 ** 18; // 1 ETH
@@ -216,7 +216,7 @@ contract StringsLibraryComparisonTest is Test {
     /**
      * @notice Test edge cases where implementations might differ
      */
-    function testEdgeCases() public view {
+    function testEdgeCases() public pure {
         uint[] memory edgeCases = new uint[](6);
         edgeCases[0] = 0;
         edgeCases[1] = 1;

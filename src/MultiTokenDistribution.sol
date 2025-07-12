@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -15,6 +15,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
  *
  * @dev Key Features:
  *      - Support for multiple ERC20 tokens (WETH, USDC, USDT, etc.)
+ *      - Role-based access control for different operations
  *      - Configurable token support with activation/deactivation
  *      - Comprehensive distribution tracking and statistics
  *      - Emergency pause functionality
@@ -24,13 +25,35 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
  * @dev Security Features:
  *      - Reentrancy protection
  *      - Pausable for emergency stops
- *      - Owner-only administrative functions
+ *      - Role-based administrative functions
  *      - SafeERC20 for secure token operations
  *      - Comprehensive input validation
  *      - CEI (Checks-Effects-Interactions) pattern
+ *
+ * @dev Access Control Roles:
+ *      - ADMIN_ROLE: Full administrative access, can grant/revoke roles
+ *      - DISTRIBUTOR_ROLE: Can distribute tokens to users
+ *      - TOKEN_MANAGER_ROLE: Can add/remove tokens and update their status
+ *      - EMERGENCY_ROLE: Can pause/unpause contract and emergency withdraw
  */
-contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
+contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                               ROLES
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /// @notice Role for full administrative access
+    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
+
+    /// @notice Role for token distribution operations
+    bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
+
+    /// @notice Role for token management operations
+    bytes32 public constant TOKEN_MANAGER_ROLE = keccak256("TOKEN_MANAGER_ROLE");
+
+    /// @notice Role for emergency operations
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
 
     /* ═══════════════════════════════════════════════════════════════════════
                                STRUCTURES
@@ -115,10 +138,40 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Initialize the MultiTokenDistribution contract
-     * @param _initialOwner Initial owner of the contract
+     * @param _admin Initial admin who will have all roles
      */
-    constructor(address _initialOwner) Ownable(_initialOwner) {
-        require(_initialOwner != address(0), "Initial owner cannot be zero");
+    constructor(address _admin) {
+        require(_admin != address(0), "Admin cannot be zero address");
+
+        // Grant all roles to the admin
+        _grantRole(ADMIN_ROLE, _admin);
+        _grantRole(DISTRIBUTOR_ROLE, _admin);
+        _grantRole(TOKEN_MANAGER_ROLE, _admin);
+        _grantRole(EMERGENCY_ROLE, _admin);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                             ROLE MANAGEMENT
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Grant a role to an account
+     * @param role Role to grant
+     * @param account Account to grant role to
+     * @dev Only accounts with ADMIN_ROLE can grant roles
+     */
+    function grantRole(bytes32 role, address account) public override onlyRole(ADMIN_ROLE) {
+        _grantRole(role, account);
+    }
+
+    /**
+     * @notice Revoke a role from an account
+     * @param role Role to revoke
+     * @param account Account to revoke role from
+     * @dev Only accounts with ADMIN_ROLE can revoke roles
+     */
+    function revokeRole(bytes32 role, address account) public override onlyRole(ADMIN_ROLE) {
+        _revokeRole(role, account);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -132,7 +185,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param decimals Number of decimals for the token
      *
      * Requirements:
-     * - Caller must be the owner
+     * - Caller must have TOKEN_MANAGER_ROLE
      * - Token symbol must not already exist
      * - Token address must not be zero
      * - Symbol must not be empty
@@ -142,7 +195,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      */
     function addToken(string memory symbol, address tokenAddress, uint8 decimals)
         external
-        onlyOwner
+        onlyRole(TOKEN_MANAGER_ROLE)
     {
         if (bytes(symbol).length == 0) {
             revert InvalidSymbol(symbol);
@@ -172,13 +225,16 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param isActive New active status
      *
      * Requirements:
-     * - Caller must be the owner
+     * - Caller must have TOKEN_MANAGER_ROLE
      * - Token must exist
      *
      * Emits:
      * - TokenStatusUpdated event
      */
-    function setTokenStatus(string memory symbol, bool isActive) external onlyOwner {
+    function setTokenStatus(string memory symbol, bool isActive)
+        external
+        onlyRole(TOKEN_MANAGER_ROLE)
+    {
         if (supportedTokens[symbol].tokenAddress == address(0)) {
             revert TokenNotSupported(symbol);
         }
@@ -199,7 +255,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      *
      * Requirements:
      * - Contract must not be paused
-     * - Caller must be the owner
+     * - Caller must have DISTRIBUTOR_ROLE
      * - Token must be supported and active
      * - Recipient must not be zero address
      * - Amount must be greater than 0
@@ -210,7 +266,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      */
     function distributeToken(string memory symbol, address to, uint amount)
         external
-        onlyOwner
+        onlyRole(DISTRIBUTOR_ROLE)
         nonReentrant
         whenNotPaused
     {
@@ -258,7 +314,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      *
      * Requirements:
      * - Contract must not be paused
-     * - Caller must be the owner
+     * - Caller must have DISTRIBUTOR_ROLE
      * - Token must be supported and active
      * - Users and amounts arrays must have the same length
      * - All recipients must be valid addresses
@@ -273,7 +329,7 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
         string memory symbol,
         address[] calldata users,
         uint[] calldata amounts
-    ) external onlyOwner nonReentrant whenNotPaused {
+    ) external onlyRole(DISTRIBUTOR_ROLE) nonReentrant whenNotPaused {
         if (users.length != amounts.length) {
             revert InvalidArrayLength(users.length, amounts.length);
         }
@@ -357,14 +413,17 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
      * @param amount Amount to withdraw (0 means withdraw all)
      *
      * Requirements:
-     * - Caller must be the owner
+     * - Caller must have EMERGENCY_ROLE
      * - Token must be supported
      * - Recipient must not be zero address
      *
      * Emits:
      * - EmergencyWithdraw event
      */
-    function emergencyWithdraw(string memory symbol, address to, uint amount) external onlyOwner {
+    function emergencyWithdraw(string memory symbol, address to, uint amount)
+        external
+        onlyRole(EMERGENCY_ROLE)
+    {
         if (supportedTokens[symbol].tokenAddress == address(0)) {
             revert TokenNotSupported(symbol);
         }
@@ -389,15 +448,17 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Pause the contract (emergency stop)
+     * @dev Only accounts with EMERGENCY_ROLE can pause
      */
-    function pause() external onlyOwner {
+    function pause() external onlyRole(EMERGENCY_ROLE) {
         _pause();
     }
 
     /**
      * @notice Unpause the contract
+     * @dev Only accounts with EMERGENCY_ROLE can unpause
      */
-    function unpause() external onlyOwner {
+    function unpause() external onlyRole(EMERGENCY_ROLE) {
         _unpause();
     }
 
@@ -478,6 +539,16 @@ contract MultiTokenDistribution is Ownable, ReentrancyGuard, Pausable {
         }
 
         return filteredHistory;
+    }
+
+    /**
+     * @notice Check if an account has a specific role
+     * @param role Role to check
+     * @param account Account to check
+     * @return True if account has the role
+     */
+    function hasRole(bytes32 role, address account) public view override returns (bool) {
+        return super.hasRole(role, account);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
