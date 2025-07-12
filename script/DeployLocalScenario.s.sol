@@ -126,7 +126,9 @@ contract DeployLocalScenario is Script {
         multiTokenDist = new MultiTokenDistribution(ADMIN);
 
         console.log("MultiTokenDistribution deployed at:", address(multiTokenDist));
-        console.log("Owner:", multiTokenDist.owner());
+        console.log(
+            "Admin has ADMIN_ROLE:", multiTokenDist.hasRole(multiTokenDist.ADMIN_ROLE(), ADMIN)
+        );
     }
 
     function _deployMockTokens() internal {

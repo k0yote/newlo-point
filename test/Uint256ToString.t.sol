@@ -34,7 +34,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test basic functionality with small numbers
      */
-    function testBasicNumbers() public view {
+    function testBasicNumbers() public pure {
         assertEq(_uint256ToString(0), "0");
         assertEq(_uint256ToString(1), "1");
         assertEq(_uint256ToString(9), "9");
@@ -49,7 +49,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test large numbers
      */
-    function testLargeNumbers() public view {
+    function testLargeNumbers() public pure {
         assertEq(_uint256ToString(1234567890), "1234567890");
         assertEq(_uint256ToString(10 ** 18), "1000000000000000000"); // 1 ETH in wei
         assertEq(_uint256ToString(2000 * 10 ** 6), "2000000000"); // $2000 in USDC units
@@ -59,7 +59,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test maximum uint256 value
      */
-    function testMaxValue() public view {
+    function testMaxValue() public pure {
         uint maxValue = type(uint).max;
         string memory result = _uint256ToString(maxValue);
 
@@ -72,7 +72,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test powers of 10
      */
-    function testPowersOfTen() public view {
+    function testPowersOfTen() public pure {
         assertEq(_uint256ToString(10 ** 0), "1");
         assertEq(_uint256ToString(10 ** 1), "10");
         assertEq(_uint256ToString(10 ** 2), "100");
@@ -87,7 +87,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test numbers with repeating digits
      */
-    function testRepeatingDigits() public view {
+    function testRepeatingDigits() public pure {
         assertEq(_uint256ToString(111), "111");
         assertEq(_uint256ToString(222), "222");
         assertEq(_uint256ToString(333333), "333333");
@@ -98,7 +98,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Test realistic DeFi amounts
      */
-    function testDeFiAmounts() public view {
+    function testDeFiAmounts() public pure {
         // Common token amounts
         uint oneETH = 1 * 10 ** 18;
         uint tenETH = 10 * 10 ** 18;
@@ -121,7 +121,7 @@ contract Uint256ToStringTest is Test {
     /**
      * @notice Fuzz test to verify function works with random inputs
      */
-    function testFuzzConversion(uint value) public view {
+    function testFuzzConversion(uint value) public pure {
         string memory result = _uint256ToString(value);
 
         // Basic checks

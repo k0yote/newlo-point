@@ -6,6 +6,8 @@ import { console } from "forge-std/console.sol";
 import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
+import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 // Mock ERC20 token for testing
 contract MockERC20 is ERC20 {
@@ -33,10 +35,21 @@ contract MultiTokenDistributionTest is Test {
     MockERC20 public usdc;
     MockERC20 public usdt;
 
-    address public owner = address(0x1);
-    address public user1 = address(0x2);
-    address public user2 = address(0x3);
-    address public user3 = address(0x4);
+    // Role constants
+    bytes32 public constant ADMIN_ROLE = 0x00;
+    bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
+    bytes32 public constant TOKEN_MANAGER_ROLE = keccak256("TOKEN_MANAGER_ROLE");
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+
+    // Test addresses
+    address public admin = address(0x1);
+    address public distributor = address(0x2);
+    address public tokenManager = address(0x3);
+    address public emergencyManager = address(0x4);
+    address public user1 = address(0x5);
+    address public user2 = address(0x6);
+    address public user3 = address(0x7);
+    address public unauthorized = address(0x8);
 
     event TokenAdded(string indexed symbol, address indexed tokenAddress, uint8 decimals);
     event TokenStatusUpdated(string indexed symbol, bool isActive);
@@ -52,9 +65,16 @@ contract MultiTokenDistributionTest is Test {
         usdc = new MockERC20("USD Coin", "USDC", 6, 1000000 * 10 ** 6);
         usdt = new MockERC20("Tether USD", "USDT", 6, 1000000 * 10 ** 6);
 
-        // Deploy distribution contract
-        vm.prank(owner);
-        distribution = new MultiTokenDistribution(owner);
+        // Deploy distribution contract with admin
+        vm.prank(admin);
+        distribution = new MultiTokenDistribution(admin);
+
+        // Grant specific roles to different users
+        vm.startPrank(admin);
+        distribution.grantRole(DISTRIBUTOR_ROLE, distributor);
+        distribution.grantRole(TOKEN_MANAGER_ROLE, tokenManager);
+        distribution.grantRole(EMERGENCY_ROLE, emergencyManager);
+        vm.stopPrank();
 
         // Fund the distribution contract
         weth.transfer(address(distribution), 100 ether);
@@ -63,11 +83,58 @@ contract MultiTokenDistributionTest is Test {
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
+                              ROLE MANAGEMENT TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function test_constructor_SetsInitialRoles() public {
+        assertTrue(distribution.hasRole(ADMIN_ROLE, admin));
+        assertTrue(distribution.hasRole(DISTRIBUTOR_ROLE, admin));
+        assertTrue(distribution.hasRole(TOKEN_MANAGER_ROLE, admin));
+        assertTrue(distribution.hasRole(EMERGENCY_ROLE, admin));
+    }
+
+    function test_grantRole_Success() public {
+        vm.prank(admin);
+        distribution.grantRole(DISTRIBUTOR_ROLE, user1);
+        assertTrue(distribution.hasRole(DISTRIBUTOR_ROLE, user1));
+    }
+
+    function test_grantRole_RevertIfNotAdmin() public {
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, unauthorized, ADMIN_ROLE
+            )
+        );
+        distribution.grantRole(DISTRIBUTOR_ROLE, user1);
+    }
+
+    function test_revokeRole_Success() public {
+        vm.startPrank(admin);
+        distribution.grantRole(DISTRIBUTOR_ROLE, user1);
+        assertTrue(distribution.hasRole(DISTRIBUTOR_ROLE, user1));
+
+        distribution.revokeRole(DISTRIBUTOR_ROLE, user1);
+        assertFalse(distribution.hasRole(DISTRIBUTOR_ROLE, user1));
+        vm.stopPrank();
+    }
+
+    function test_revokeRole_RevertIfNotAdmin() public {
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, unauthorized, ADMIN_ROLE
+            )
+        );
+        distribution.revokeRole(DISTRIBUTOR_ROLE, distributor);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
                            TOKEN MANAGEMENT TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
     function test_addToken_Success() public {
-        vm.prank(owner);
+        vm.prank(tokenManager);
 
         vm.expectEmit(true, true, false, true);
         emit TokenAdded("WETH", address(weth), 18);
@@ -89,14 +156,20 @@ contract MultiTokenDistributionTest is Test {
         assertEq(totalUsers, 0);
     }
 
-    function test_addToken_RevertIfNotOwner() public {
-        vm.prank(user1);
-        vm.expectRevert();
+    function test_addToken_RevertIfNotTokenManager() public {
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                TOKEN_MANAGER_ROLE
+            )
+        );
         distribution.addToken("WETH", address(weth), 18);
     }
 
     function test_addToken_RevertIfTokenAlreadyExists() public {
-        vm.startPrank(owner);
+        vm.startPrank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         vm.expectRevert(
@@ -107,7 +180,7 @@ contract MultiTokenDistributionTest is Test {
     }
 
     function test_addToken_RevertIfInvalidAddress() public {
-        vm.prank(owner);
+        vm.prank(tokenManager);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.InvalidTokenAddress.selector, address(0))
         );
@@ -115,15 +188,16 @@ contract MultiTokenDistributionTest is Test {
     }
 
     function test_addToken_RevertIfInvalidSymbol() public {
-        vm.prank(owner);
+        vm.prank(tokenManager);
         vm.expectRevert(abi.encodeWithSelector(MultiTokenDistribution.InvalidSymbol.selector, ""));
         distribution.addToken("", address(weth), 18);
     }
 
     function test_setTokenStatus_Success() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
+        vm.prank(tokenManager);
         vm.expectEmit(true, false, false, true);
         emit TokenStatusUpdated("WETH", false);
 
@@ -131,11 +205,25 @@ contract MultiTokenDistributionTest is Test {
 
         (,, bool isActive,,) = distribution.supportedTokens("WETH");
         assertFalse(isActive);
-        vm.stopPrank();
+    }
+
+    function test_setTokenStatus_RevertIfNotTokenManager() public {
+        vm.prank(tokenManager);
+        distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                TOKEN_MANAGER_ROLE
+            )
+        );
+        distribution.setTokenStatus("WETH", false);
     }
 
     function test_setTokenStatus_RevertIfTokenNotSupported() public {
-        vm.prank(owner);
+        vm.prank(tokenManager);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.TokenNotSupported.selector, "WETH")
         );
@@ -147,12 +235,13 @@ contract MultiTokenDistributionTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function test_distributeToken_Success() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         uint initialBalance = weth.balanceOf(user1);
         uint distributionAmount = 1 ether;
 
+        vm.prank(distributor);
         vm.expectEmit(true, true, false, true);
         emit TokenDistributed(user1, "WETH", distributionAmount, block.timestamp);
 
@@ -166,20 +255,25 @@ contract MultiTokenDistributionTest is Test {
         (,,, uint totalDistributed, uint totalUsers) = distribution.supportedTokens("WETH");
         assertEq(totalDistributed, distributionAmount);
         assertEq(totalUsers, 1);
-        vm.stopPrank();
     }
 
-    function test_distributeToken_RevertIfNotOwner() public {
-        vm.prank(owner);
+    function test_distributeToken_RevertIfNotDistributor() public {
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
-        vm.prank(user1);
-        vm.expectRevert();
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                DISTRIBUTOR_ROLE
+            )
+        );
         distribution.distributeToken("WETH", user1, 1 ether);
     }
 
     function test_distributeToken_RevertIfTokenNotSupported() public {
-        vm.prank(owner);
+        vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.TokenNotSupported.selector, "WETH")
         );
@@ -187,44 +281,47 @@ contract MultiTokenDistributionTest is Test {
     }
 
     function test_distributeToken_RevertIfTokenNotActive() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
         distribution.setTokenStatus("WETH", false);
 
+        vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.TokenNotActive.selector, "WETH")
         );
         distribution.distributeToken("WETH", user1, 1 ether);
-        vm.stopPrank();
     }
 
     function test_distributeToken_RevertIfInvalidUser() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
+        vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.InvalidUser.selector, address(0))
         );
         distribution.distributeToken("WETH", address(0), 1 ether);
-        vm.stopPrank();
     }
 
     function test_distributeToken_RevertIfInvalidAmount() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
+        vm.prank(distributor);
         vm.expectRevert(abi.encodeWithSelector(MultiTokenDistribution.InvalidAmount.selector, 0));
         distribution.distributeToken("WETH", user1, 0);
-        vm.stopPrank();
     }
 
     function test_distributeToken_RevertIfInsufficientBalance() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         uint contractBalance = weth.balanceOf(address(distribution));
         uint excessiveAmount = contractBalance + 1 ether;
 
+        vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(
                 MultiTokenDistribution.InsufficientBalance.selector,
@@ -234,11 +331,10 @@ contract MultiTokenDistributionTest is Test {
             )
         );
         distribution.distributeToken("WETH", user1, excessiveAmount);
-        vm.stopPrank();
     }
 
     function test_batchDistributeToken_Success() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         address[] memory users = new address[](3);
@@ -253,6 +349,7 @@ contract MultiTokenDistributionTest is Test {
 
         uint totalAmount = 6 ether;
 
+        vm.prank(distributor);
         vm.expectEmit(true, false, false, true);
         emit BatchDistributionCompleted("WETH", totalAmount, 3);
 
@@ -267,11 +364,31 @@ contract MultiTokenDistributionTest is Test {
         (,,, uint totalDistributed, uint totalUsers) = distribution.supportedTokens("WETH");
         assertEq(totalDistributed, totalAmount);
         assertEq(totalUsers, 3);
-        vm.stopPrank();
+    }
+
+    function test_batchDistributeToken_RevertIfNotDistributor() public {
+        vm.prank(tokenManager);
+        distribution.addToken("WETH", address(weth), 18);
+
+        address[] memory users = new address[](1);
+        users[0] = user1;
+
+        uint[] memory amounts = new uint[](1);
+        amounts[0] = 1 ether;
+
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                DISTRIBUTOR_ROLE
+            )
+        );
+        distribution.batchDistributeToken("WETH", users, amounts);
     }
 
     function test_batchDistributeToken_RevertIfInvalidArrayLength() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         address[] memory users = new address[](2);
@@ -283,11 +400,11 @@ contract MultiTokenDistributionTest is Test {
         amounts[1] = 2 ether;
         amounts[2] = 3 ether;
 
+        vm.prank(distributor);
         vm.expectRevert(
             abi.encodeWithSelector(MultiTokenDistribution.InvalidArrayLength.selector, 2, 3)
         );
         distribution.batchDistributeToken("WETH", users, amounts);
-        vm.stopPrank();
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -295,60 +412,105 @@ contract MultiTokenDistributionTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function test_emergencyWithdraw_Success() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         uint withdrawAmount = 10 ether;
-        uint initialBalance = weth.balanceOf(owner);
+        uint initialBalance = weth.balanceOf(admin);
 
+        vm.prank(emergencyManager);
         vm.expectEmit(true, true, false, true);
-        emit EmergencyWithdraw(owner, "WETH", withdrawAmount);
+        emit EmergencyWithdraw(admin, "WETH", withdrawAmount);
 
-        distribution.emergencyWithdraw("WETH", owner, withdrawAmount);
+        distribution.emergencyWithdraw("WETH", admin, withdrawAmount);
 
-        assertEq(weth.balanceOf(owner), initialBalance + withdrawAmount);
-        vm.stopPrank();
+        assertEq(weth.balanceOf(admin), initialBalance + withdrawAmount);
+    }
+
+    function test_emergencyWithdraw_RevertIfNotEmergencyManager() public {
+        vm.prank(tokenManager);
+        distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                EMERGENCY_ROLE
+            )
+        );
+        distribution.emergencyWithdraw("WETH", admin, 10 ether);
     }
 
     function test_emergencyWithdraw_WithdrawAll() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         uint contractBalance = weth.balanceOf(address(distribution));
-        uint initialBalance = weth.balanceOf(owner);
+        uint initialBalance = weth.balanceOf(admin);
 
+        vm.prank(emergencyManager);
         vm.expectEmit(true, true, false, true);
-        emit EmergencyWithdraw(owner, "WETH", contractBalance);
+        emit EmergencyWithdraw(admin, "WETH", contractBalance);
 
-        distribution.emergencyWithdraw("WETH", owner, 0); // 0 means withdraw all
+        distribution.emergencyWithdraw("WETH", admin, 0); // 0 means withdraw all
 
-        assertEq(weth.balanceOf(owner), initialBalance + contractBalance);
+        assertEq(weth.balanceOf(admin), initialBalance + contractBalance);
         assertEq(weth.balanceOf(address(distribution)), 0);
-        vm.stopPrank();
     }
 
     function test_pause_Success() public {
-        vm.prank(owner);
+        vm.prank(emergencyManager);
         distribution.pause();
         assertTrue(distribution.paused());
     }
 
-    function test_unpause_Success() public {
-        vm.startPrank(owner);
+    function test_pause_RevertIfNotEmergencyManager() public {
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                EMERGENCY_ROLE
+            )
+        );
         distribution.pause();
+    }
+
+    function test_unpause_Success() public {
+        vm.prank(emergencyManager);
+        distribution.pause();
+
+        vm.prank(emergencyManager);
         distribution.unpause();
         assertFalse(distribution.paused());
-        vm.stopPrank();
+    }
+
+    function test_unpause_RevertIfNotEmergencyManager() public {
+        vm.prank(emergencyManager);
+        distribution.pause();
+
+        vm.prank(unauthorized);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                EMERGENCY_ROLE
+            )
+        );
+        distribution.unpause();
     }
 
     function test_distributeToken_RevertIfPaused() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(emergencyManager);
         distribution.pause();
 
+        vm.prank(distributor);
         vm.expectRevert();
         distribution.distributeToken("WETH", user1, 1 ether);
-        vm.stopPrank();
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -356,44 +518,49 @@ contract MultiTokenDistributionTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function test_getTokenCount() public {
-        vm.startPrank(owner);
         assertEq(distribution.getTokenCount(), 0);
 
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
         assertEq(distribution.getTokenCount(), 1);
 
+        vm.prank(tokenManager);
         distribution.addToken("USDC", address(usdc), 6);
         assertEq(distribution.getTokenCount(), 2);
-        vm.stopPrank();
     }
 
     function test_getAllTokenSymbols() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
         distribution.addToken("USDC", address(usdc), 6);
 
         string[] memory symbols = distribution.getAllTokenSymbols();
         assertEq(symbols.length, 2);
         assertEq(symbols[0], "WETH");
         assertEq(symbols[1], "USDC");
-        vm.stopPrank();
     }
 
     function test_getTokenBalance() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
 
         uint balance = distribution.getTokenBalance("WETH");
         assertEq(balance, weth.balanceOf(address(distribution)));
-        vm.stopPrank();
     }
 
     function test_getUserDistributionHistory() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
         distribution.addToken("USDC", address(usdc), 6);
 
+        vm.prank(distributor);
         distribution.distributeToken("WETH", user1, 1 ether);
+
+        vm.prank(distributor);
         distribution.distributeToken("USDC", user1, 1000 * 10 ** 6);
 
         MultiTokenDistribution.DistributionRecord[] memory history =
@@ -404,16 +571,22 @@ contract MultiTokenDistributionTest is Test {
         assertEq(history[0].tokenSymbol, "WETH");
         assertEq(history[1].amount, 1000 * 10 ** 6);
         assertEq(history[1].tokenSymbol, "USDC");
-        vm.stopPrank();
     }
 
     function test_getUserTokenHistory() public {
-        vm.startPrank(owner);
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
         distribution.addToken("USDC", address(usdc), 6);
 
+        vm.prank(distributor);
         distribution.distributeToken("WETH", user1, 1 ether);
+
+        vm.prank(distributor);
         distribution.distributeToken("USDC", user1, 1000 * 10 ** 6);
+
+        vm.prank(distributor);
         distribution.distributeToken("WETH", user1, 2 ether);
 
         MultiTokenDistribution.DistributionRecord[] memory wethHistory =
@@ -428,7 +601,6 @@ contract MultiTokenDistributionTest is Test {
 
         assertEq(usdcHistory.length, 1);
         assertEq(usdcHistory[0].amount, 1000 * 10 ** 6);
-        vm.stopPrank();
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -436,16 +608,24 @@ contract MultiTokenDistributionTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function test_fullWorkflow() public {
-        vm.startPrank(owner);
-
         // Add multiple tokens
+        vm.prank(tokenManager);
         distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
         distribution.addToken("USDC", address(usdc), 6);
+
+        vm.prank(tokenManager);
         distribution.addToken("USDT", address(usdt), 6);
 
         // Distribute to multiple users
+        vm.prank(distributor);
         distribution.distributeToken("WETH", user1, 1 ether);
+
+        vm.prank(distributor);
         distribution.distributeToken("USDC", user1, 1000 * 10 ** 6);
+
+        vm.prank(distributor);
         distribution.distributeToken("USDT", user2, 500 * 10 ** 6);
 
         // Batch distribute
@@ -457,6 +637,7 @@ contract MultiTokenDistributionTest is Test {
         amounts[0] = 2 ether;
         amounts[1] = 3 ether;
 
+        vm.prank(distributor);
         distribution.batchDistributeToken("WETH", users, amounts);
 
         // Check final state
@@ -477,7 +658,82 @@ contract MultiTokenDistributionTest is Test {
         assertEq(weth.balanceOf(user3), 3 ether);
         assertEq(usdc.balanceOf(user1), 1000 * 10 ** 6);
         assertEq(usdt.balanceOf(user2), 500 * 10 ** 6);
+    }
 
-        vm.stopPrank();
+    /* ═══════════════════════════════════════════════════════════════════════
+                         CROSS-ROLE ACCESS CONTROL TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function test_adminCanPerformAllOperations() public {
+        // Admin can do token management
+        vm.prank(admin);
+        distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(admin);
+        distribution.setTokenStatus("WETH", false);
+
+        // Admin can do distribution
+        vm.prank(admin);
+        distribution.setTokenStatus("WETH", true);
+
+        vm.prank(admin);
+        distribution.distributeToken("WETH", user1, 1 ether);
+
+        // Admin can do emergency operations
+        vm.prank(admin);
+        distribution.pause();
+
+        vm.prank(admin);
+        distribution.unpause();
+
+        vm.prank(admin);
+        distribution.emergencyWithdraw("WETH", admin, 1 ether);
+
+        // Verify operations were successful
+        assertEq(weth.balanceOf(user1), 1 ether);
+        assertEq(weth.balanceOf(admin), 1 ether);
+        assertFalse(distribution.paused());
+    }
+
+    function test_distributorCannotDoTokenManagement() public {
+        vm.prank(distributor);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                distributor,
+                TOKEN_MANAGER_ROLE
+            )
+        );
+        distribution.addToken("WETH", address(weth), 18);
+    }
+
+    function test_tokenManagerCannotDoDistribution() public {
+        vm.prank(tokenManager);
+        distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(tokenManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                tokenManager,
+                DISTRIBUTOR_ROLE
+            )
+        );
+        distribution.distributeToken("WETH", user1, 1 ether);
+    }
+
+    function test_emergencyManagerCannotDoDistribution() public {
+        vm.prank(tokenManager);
+        distribution.addToken("WETH", address(weth), 18);
+
+        vm.prank(emergencyManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                emergencyManager,
+                DISTRIBUTOR_ROLE
+            )
+        );
+        distribution.distributeToken("WETH", user1, 1 ether);
     }
 }
