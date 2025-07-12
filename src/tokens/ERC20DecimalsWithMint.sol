@@ -54,7 +54,7 @@ contract ERC20DecimalsWithMint is ERC20Decimals {
      * - Mint $100 USDC (6 decimals): mint(user, 100 * 10**6)
      * - Mint $50 USDT (6 decimals): mint(user, 50 * 10**6)
      */
-    function mint(address to, uint amount) external {
+    function mint(address to, uint amount) external virtual {
         _mint(to, amount);
     }
 
