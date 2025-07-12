@@ -31,6 +31,9 @@ brew install bc
 # プロジェクトディレクトリに移動
 cd newlo-point-contract
 
+# 環境設定情報(それぞれの環境に合わせてください)
+cp .env.sample .env
+
 # スクリプトに実行権限を付与
 chmod +x scripts/local-dev.sh
 
