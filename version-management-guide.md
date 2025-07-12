@@ -173,6 +173,9 @@ setup(version=__version__)
 VERSION_TYPE=${1:-patch}  # patch, minor, major
 CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
 
+# Strip the 'v' prefix if present
+CURRENT_VERSION=${CURRENT_VERSION#v}
+
 case $VERSION_TYPE in
   patch)
     NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')
