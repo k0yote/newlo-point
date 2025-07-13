@@ -586,7 +586,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         // Use the more reliable price source for the event
         bool bothOracle = tokenPriceSource == PriceSource.CHAINLINK_ORACLE
             && jpyPriceSource == PriceSource.CHAINLINK_ORACLE;
-        PriceSource priceSource = bothOracle ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
+        PriceSource priceSource =
+            bothOracle ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
 
         result = PriceCalculationResult({
             tokenUsdPrice: tokenUsdPrice,
@@ -634,13 +635,19 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             if (config.decimals < 18) {
                 uint decimalAdjustment = 10 ** (18 - config.decimals);
                 tokenAmount = netAmountInUSD / (priceResult.tokenUsdPrice * decimalAdjustment);
-                exchangeFee = Math.mulDiv(exchangeFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment);
-                operationalFee = Math.mulDiv(operationalFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment);
+                exchangeFee =
+                    Math.mulDiv(exchangeFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment);
+                operationalFee = Math.mulDiv(
+                    operationalFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment
+                );
             } else {
                 uint decimalAdjustment = 10 ** (config.decimals - 18);
-                tokenAmount = Math.mulDiv(netAmountInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
-                exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
-                operationalFee = Math.mulDiv(operationalFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+                tokenAmount =
+                    Math.mulDiv(netAmountInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+                exchangeFee =
+                    Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+                operationalFee =
+                    Math.mulDiv(operationalFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
             }
         } else {
             tokenAmount = netAmountInUSD / priceResult.tokenUsdPrice;
@@ -820,14 +827,17 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     {
         // Calculate prices
         PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
-        
+
         // Calculate token amounts
-        TokenAmountResult memory amountResult = _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
 
         // Check balance
         if (tokenType == TokenType.ETH) {
             if (address(this).balance < amountResult.tokenAmount) {
-                revert InsufficientBalance(tokenType, amountResult.tokenAmount, address(this).balance);
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, address(this).balance
+                );
             }
         } else {
             TokenConfig memory config = tokenConfigs[tokenType];
@@ -999,7 +1009,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
 
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
-            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (TokenAmountResult memory amountResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 tokenAmount = amountResult.tokenAmount;
                 tokenUsdRate = priceResult.tokenUsdPrice;
                 jpyUsdRate = priceResult.jpyUsdPrice;
