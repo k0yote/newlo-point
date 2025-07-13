@@ -112,6 +112,20 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         bool isEnabled; // Whether operational fee is enabled
     }
 
+    /// @notice Price calculation result
+    struct PriceCalculationResult {
+        uint tokenUsdPrice; // Token price in USD (18 decimals)
+        uint jpyUsdPrice; // JPY/USD price (18 decimals)
+        PriceSource priceSource; // Price source used
+    }
+
+    /// @notice Token amount calculation result
+    struct TokenAmountResult {
+        uint tokenAmount; // Final token amount to send
+        uint exchangeFee; // Exchange fee amount
+        uint operationalFee; // Operational fee amount
+    }
+
     /* ═══════════════════════════════════════════════════════════════════════
                                IMMUTABLE STATE
     ═══════════════════════════════════════════════════════════════════════ */
@@ -556,6 +570,191 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
+     * @notice Calculate prices for exchange
+     * @param tokenType Type of token to exchange
+     * @return result Price calculation result
+     */
+    function _calculatePrices(TokenType tokenType)
+        public
+        view
+        returns (PriceCalculationResult memory result)
+    {
+        // Get prices
+        (uint tokenUsdPrice, PriceSource tokenPriceSource) = _getTokenPrice(tokenType);
+        (uint jpyUsdPrice, PriceSource jpyPriceSource) = _getJPYUSDPrice();
+
+        // Use the more reliable price source for the event
+        bool bothOracle = tokenPriceSource == PriceSource.CHAINLINK_ORACLE
+            && jpyPriceSource == PriceSource.CHAINLINK_ORACLE;
+        PriceSource priceSource =
+            bothOracle ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
+
+        result = PriceCalculationResult({
+            tokenUsdPrice: tokenUsdPrice,
+            jpyUsdPrice: jpyUsdPrice,
+            priceSource: priceSource
+        });
+    }
+
+    /**
+     * @notice Calculate token amounts with proper decimal adjustment
+     * @param tokenType Type of token to exchange
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param priceResult Price calculation result
+     * @return result Token amount calculation result
+     */
+    function _calculateTokenAmounts(
+        TokenType tokenType,
+        uint nlpAmount,
+        PriceCalculationResult memory priceResult
+    ) public view returns (TokenAmountResult memory result) {
+        TokenConfig memory config = tokenConfigs[tokenType];
+        OperationalFeeConfig memory opFeeConfig = operationalFeeConfigs[tokenType];
+
+        // Enhanced calculation with improved precision
+        // Calculate gross amount in USD terms (18 decimals)
+        uint grossAmountInUSD = nlpAmount * priceResult.jpyUsdPrice;
+
+        // Calculate fees in USD terms first to avoid precision loss
+        uint exchangeFeeInUSD = (grossAmountInUSD * config.exchangeFee) / 10000;
+        uint operationalFeeInUSD = 0;
+        if (opFeeConfig.isEnabled) {
+            operationalFeeInUSD = (grossAmountInUSD * opFeeConfig.feeRate) / 10000;
+        }
+
+        // Calculate net amount in USD terms
+        uint netAmountInUSD = grossAmountInUSD - exchangeFeeInUSD - operationalFeeInUSD;
+
+        // Convert to target token amount with proper decimal adjustment
+        uint tokenAmount;
+        uint exchangeFee;
+        uint operationalFee;
+
+        // Adjust for token decimals before division to maintain precision
+        if (config.decimals != 18) {
+            if (config.decimals < 18) {
+                uint decimalAdjustment = 10 ** (18 - config.decimals);
+                tokenAmount = netAmountInUSD / (priceResult.tokenUsdPrice * decimalAdjustment);
+                exchangeFee =
+                    Math.mulDiv(exchangeFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment);
+                operationalFee = Math.mulDiv(
+                    operationalFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment
+                );
+            } else {
+                uint decimalAdjustment = 10 ** (config.decimals - 18);
+                tokenAmount =
+                    Math.mulDiv(netAmountInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+                exchangeFee =
+                    Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+                operationalFee =
+                    Math.mulDiv(operationalFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
+            }
+        } else {
+            tokenAmount = netAmountInUSD / priceResult.tokenUsdPrice;
+            exchangeFee = exchangeFeeInUSD / priceResult.tokenUsdPrice;
+            operationalFee = operationalFeeInUSD / priceResult.tokenUsdPrice;
+        }
+
+        result = TokenAmountResult({
+            tokenAmount: tokenAmount,
+            exchangeFee: exchangeFee,
+            operationalFee: operationalFee
+        });
+    }
+
+    /**
+     * @notice Update statistics and user records
+     * @param tokenType Type of token
+     * @param nlpAmount Amount of NLP tokens exchanged
+     * @param user User address
+     * @param amountResult Token amount calculation result
+     */
+    function _updateStatistics(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        TokenAmountResult memory amountResult
+    ) internal {
+        // Update statistics (CEI pattern)
+        tokenStats[tokenType].totalExchanged += nlpAmount;
+        tokenStats[tokenType].totalTokenSent += amountResult.tokenAmount;
+        tokenStats[tokenType].totalExchangeFeeCollected += amountResult.exchangeFee;
+        tokenStats[tokenType].totalOperationalFeeCollected += amountResult.operationalFee;
+        tokenStats[tokenType].exchangeCount += 1;
+
+        // Update operational fee collection
+        if (amountResult.operationalFee > 0) {
+            collectedOperationalFees[tokenType] += amountResult.operationalFee;
+        }
+
+        // Update user records
+        userExchangeAmount[user][tokenType] += nlpAmount;
+        userTokenReceived[user][tokenType] += amountResult.tokenAmount;
+    }
+
+    /**
+     * @notice Execute token transfer and emit events
+     * @param tokenType Type of token to transfer
+     * @param nlpAmount Amount of NLP tokens exchanged
+     * @param user User address
+     * @param relayer Relayer address (address(0) for direct exchange)
+     * @param priceResult Price calculation result
+     * @param amountResult Token amount calculation result
+     */
+    function _executeTokenTransfer(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        PriceCalculationResult memory priceResult,
+        TokenAmountResult memory amountResult
+    ) internal {
+        // Burn NLP tokens
+        try nlpToken.burnFrom(user, nlpAmount) {
+            // Burn successful
+        } catch {
+            revert ExchangeFailed(user, nlpAmount);
+        }
+
+        // Send tokens to user
+        if (tokenType == TokenType.ETH) {
+            Address.sendValue(payable(user), amountResult.tokenAmount);
+        } else {
+            TokenConfig memory config = tokenConfigs[tokenType];
+            IERC20Extended token = IERC20Extended(config.tokenAddress);
+            require(token.transfer(user, amountResult.tokenAmount), "Token transfer failed");
+        }
+
+        // Emit appropriate event
+        if (relayer == address(0)) {
+            emit ExchangeExecuted(
+                user,
+                tokenType,
+                nlpAmount,
+                amountResult.tokenAmount,
+                priceResult.tokenUsdPrice,
+                priceResult.jpyUsdPrice,
+                amountResult.exchangeFee,
+                amountResult.operationalFee,
+                priceResult.priceSource
+            );
+        } else {
+            emit GaslessExchangeExecuted(
+                user,
+                relayer,
+                tokenType,
+                nlpAmount,
+                amountResult.tokenAmount,
+                priceResult.tokenUsdPrice,
+                priceResult.jpyUsdPrice,
+                amountResult.exchangeFee,
+                amountResult.operationalFee,
+                priceResult.priceSource
+            );
+        }
+    }
+
+    /**
      * @notice Exchange NLP tokens for specified token using permit for gasless operation
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
@@ -626,135 +825,35 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     function _executeExchange(TokenType tokenType, uint nlpAmount, address user, address relayer)
         internal
     {
-        TokenConfig memory config = tokenConfigs[tokenType];
-        OperationalFeeConfig memory opFeeConfig = operationalFeeConfigs[tokenType];
+        // Calculate prices
+        PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
 
-        // Get prices
-        (uint tokenUsdPrice, PriceSource tokenPriceSource) = _getTokenPrice(tokenType);
-        (uint jpyUsdPrice, PriceSource jpyPriceSource) = _getJPYUSDPrice();
-
-        // Use the more reliable price source for the event
-        PriceSource priceSource = (
-            tokenPriceSource == PriceSource.CHAINLINK_ORACLE
-                && jpyPriceSource == PriceSource.CHAINLINK_ORACLE
-        ) ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
-
-        // Enhanced calculation with improved precision
-        // Calculate gross amount in USD terms (18 decimals)
-        uint grossAmountInUSD = nlpAmount * jpyUsdPrice;
-
-        // Calculate fees in USD terms first to avoid precision loss
-        uint exchangeFeeInUSD = (grossAmountInUSD * config.exchangeFee) / 10000;
-        uint operationalFeeInUSD = 0;
-        if (opFeeConfig.isEnabled) {
-            operationalFeeInUSD = (grossAmountInUSD * opFeeConfig.feeRate) / 10000;
-        }
-
-        // Calculate net amount in USD terms
-        uint netAmountInUSD = grossAmountInUSD - exchangeFeeInUSD - operationalFeeInUSD;
-
-        // Convert to target token amount with proper decimal adjustment
-        uint tokenAmountBeforeFee;
-        uint tokenAmountAfterFee;
-        uint exchangeFee;
-        uint operationalFee;
-
-        // Adjust for token decimals before division to maintain precision
-        if (config.decimals != 18) {
-            if (config.decimals < 18) {
-                uint decimalAdjustment = 10 ** (18 - config.decimals);
-                tokenAmountBeforeFee = grossAmountInUSD / (tokenUsdPrice * decimalAdjustment);
-                tokenAmountAfterFee = netAmountInUSD / (tokenUsdPrice * decimalAdjustment);
-                exchangeFee = Math.mulDiv(exchangeFeeInUSD, 1, tokenUsdPrice * decimalAdjustment);
-                operationalFee =
-                    Math.mulDiv(operationalFeeInUSD, 1, tokenUsdPrice * decimalAdjustment);
-            } else {
-                uint decimalAdjustment = 10 ** (config.decimals - 18);
-                tokenAmountBeforeFee =
-                    Math.mulDiv(grossAmountInUSD, decimalAdjustment, tokenUsdPrice);
-                tokenAmountAfterFee = Math.mulDiv(netAmountInUSD, decimalAdjustment, tokenUsdPrice);
-                exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, tokenUsdPrice);
-                operationalFee = Math.mulDiv(operationalFeeInUSD, decimalAdjustment, tokenUsdPrice);
-            }
-        } else {
-            tokenAmountBeforeFee = grossAmountInUSD / tokenUsdPrice;
-            tokenAmountAfterFee = netAmountInUSD / tokenUsdPrice;
-            exchangeFee = exchangeFeeInUSD / tokenUsdPrice;
-            operationalFee = operationalFeeInUSD / tokenUsdPrice;
-        }
+        // Calculate token amounts
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
 
         // Check balance
         if (tokenType == TokenType.ETH) {
-            if (address(this).balance < tokenAmountAfterFee) {
-                revert InsufficientBalance(tokenType, tokenAmountAfterFee, address(this).balance);
+            if (address(this).balance < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, address(this).balance
+                );
             }
         } else {
+            TokenConfig memory config = tokenConfigs[tokenType];
             IERC20Extended token = IERC20Extended(config.tokenAddress);
-            if (token.balanceOf(address(this)) < tokenAmountAfterFee) {
+            if (token.balanceOf(address(this)) < amountResult.tokenAmount) {
                 revert InsufficientBalance(
-                    tokenType, tokenAmountAfterFee, token.balanceOf(address(this))
+                    tokenType, amountResult.tokenAmount, token.balanceOf(address(this))
                 );
             }
         }
 
         // Update statistics (CEI pattern)
-        tokenStats[tokenType].totalExchanged += nlpAmount;
-        tokenStats[tokenType].totalTokenSent += tokenAmountAfterFee;
-        tokenStats[tokenType].totalExchangeFeeCollected += exchangeFee;
-        tokenStats[tokenType].totalOperationalFeeCollected += operationalFee;
-        tokenStats[tokenType].exchangeCount += 1;
+        _updateStatistics(tokenType, nlpAmount, user, amountResult);
 
-        // Update operational fee collection
-        if (operationalFee > 0) {
-            collectedOperationalFees[tokenType] += operationalFee;
-        }
-
-        userExchangeAmount[user][tokenType] += nlpAmount;
-        userTokenReceived[user][tokenType] += tokenAmountAfterFee;
-
-        // Burn NLP tokens
-        try nlpToken.burnFrom(user, nlpAmount) {
-            // Burn successful
-        } catch {
-            revert ExchangeFailed(user, nlpAmount);
-        }
-
-        // Send tokens to user
-        if (tokenType == TokenType.ETH) {
-            (bool ethSent,) = user.call{ value: tokenAmountAfterFee }("");
-            require(ethSent, "ETH transfer failed");
-        } else {
-            IERC20Extended token = IERC20Extended(config.tokenAddress);
-            require(token.transfer(user, tokenAmountAfterFee), "Token transfer failed");
-        }
-
-        // Emit appropriate event
-        if (relayer == address(0)) {
-            emit ExchangeExecuted(
-                user,
-                tokenType,
-                nlpAmount,
-                tokenAmountAfterFee,
-                tokenUsdPrice,
-                jpyUsdPrice,
-                exchangeFee,
-                operationalFee,
-                priceSource
-            );
-        } else {
-            emit GaslessExchangeExecuted(
-                user,
-                relayer,
-                tokenType,
-                nlpAmount,
-                tokenAmountAfterFee,
-                tokenUsdPrice,
-                jpyUsdPrice,
-                exchangeFee,
-                operationalFee,
-                priceSource
-            );
-        }
+        // Execute token transfer and emit events
+        _executeTokenTransfer(tokenType, nlpAmount, user, relayer, priceResult, amountResult);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -909,58 +1008,16 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
         }
 
-        try this._getTokenPrice(tokenType) returns (uint tokenPrice, PriceSource tokenPriceSource) {
-            try this._getJPYUSDPrice() returns (uint jpyPrice, PriceSource jpyPriceSource) {
-                tokenUsdRate = tokenPrice;
-                jpyUsdRate = jpyPrice;
-
-                priceSource = (
-                    tokenPriceSource == PriceSource.CHAINLINK_ORACLE
-                        && jpyPriceSource == PriceSource.CHAINLINK_ORACLE
-                ) ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
-
-                TokenConfig memory config = tokenConfigs[tokenType];
-                OperationalFeeConfig memory opFeeConfig = operationalFeeConfigs[tokenType];
-
-                // Enhanced calculation with improved precision (same as in _executeExchange)
-                uint grossAmountInUSD = nlpAmount * jpyUsdRate;
-
-                // Calculate fees in USD terms first to avoid precision loss
-                uint exchangeFeeInUSD = (grossAmountInUSD * config.exchangeFee) / 10000;
-                uint operationalFeeInUSD =
-                    opFeeConfig.isEnabled ? (grossAmountInUSD * opFeeConfig.feeRate) / 10000 : 0;
-
-                // Calculate net amount in USD terms
-                uint netAmountInUSD = grossAmountInUSD - exchangeFeeInUSD - operationalFeeInUSD;
-
-                // Convert to target token amount with proper decimal adjustment
-                uint tokenAmountBeforeFee;
-
-                // Adjust for token decimals before division to maintain precision
-                if (config.decimals != 18) {
-                    if (config.decimals < 18) {
-                        uint decimalAdjustment = 10 ** (18 - config.decimals);
-                        tokenAmountBeforeFee = grossAmountInUSD / (tokenUsdRate * decimalAdjustment);
-                        tokenAmount = netAmountInUSD / (tokenUsdRate * decimalAdjustment);
-                        exchangeFee =
-                            Math.mulDiv(exchangeFeeInUSD, 1, tokenUsdRate * decimalAdjustment);
-                        operationalFee =
-                            Math.mulDiv(operationalFeeInUSD, 1, tokenUsdRate * decimalAdjustment);
-                    } else {
-                        uint decimalAdjustment = 10 ** (config.decimals - 18);
-                        tokenAmountBeforeFee =
-                            Math.mulDiv(grossAmountInUSD, decimalAdjustment, tokenUsdRate);
-                        tokenAmount = Math.mulDiv(netAmountInUSD, decimalAdjustment, tokenUsdRate);
-                        exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, tokenUsdRate);
-                        operationalFee =
-                            Math.mulDiv(operationalFeeInUSD, decimalAdjustment, tokenUsdRate);
-                    }
-                } else {
-                    tokenAmountBeforeFee = grossAmountInUSD / tokenUsdRate;
-                    tokenAmount = netAmountInUSD / tokenUsdRate;
-                    exchangeFee = exchangeFeeInUSD / tokenUsdRate;
-                    operationalFee = operationalFeeInUSD / tokenUsdRate;
-                }
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
+                tokenAmount = amountResult.tokenAmount;
+                tokenUsdRate = priceResult.tokenUsdPrice;
+                jpyUsdRate = priceResult.jpyUsdPrice;
+                exchangeFee = amountResult.exchangeFee;
+                operationalFee = amountResult.operationalFee;
+                priceSource = priceResult.priceSource;
             } catch {
                 return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
             }
