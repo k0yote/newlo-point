@@ -1,6 +1,14 @@
 # 🏦 NewLo Point (NLP) Contract System
 
+**⚠️ Disclaimer**: This smart contract is experimental software. Please conduct thorough testing and auditing before using in production environments.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Solidity](https://img.shields.io/badge/Solidity-^0.8.27-blue.svg)](https://soliditylang.org/)
+
+
 ## 🔍 概要 (Overview)
+
+NewLo Point is an ERC20 point token with gradual transfer control functionality. During the initial service phase, user-to-user transfers are restricted, allowing only minting from the service operator. As the service evolves and exchanges are prepared, transfers can be gradually enabled.
 
 NewLo Point (NLP) Contract System は、包括的なDeFiプロトコルスイートです。NLPトークンの発行・管理から、マルチトークン交換システムまでを提供します。
 
@@ -176,8 +184,10 @@ forge script script/DeployMultiTokenExchange.s.sol:DeployMultiTokenExchange \
 
 ## 📚 ドキュメント
 
+
 ### 📖 詳細ガイド
 
+- **📜[コントラクトアドレス](docs/CONTRACT_ADDRESS.md)**: デプロイ済み
 - **[マルチトークン交換システム完全ガイド](docs/MULTI_TOKEN_EXCHANGE_GUIDE.md)**: 包括的な操作手順
 - **[セキュリティ監査レポート](docs/SECURITY_AUDIT_REPORT.md)**: 詳細な監査結果
 - **[本番運用ガイド](docs/PRODUCTION_OPERATIONS_GUIDE.md)**: 運用時の注意事項
@@ -219,17 +229,21 @@ forge coverage
 
 ## 🔄 更新履歴
 
-### v2.0.0 (最新版)
+### v0.4.0 (最新版)
 - ✅ Role-based Access Control導入
 - ✅ 運営手数料システム追加
 - ✅ セキュリティ強化
 - ✅ 34項目のテスト完了
 - ✅ 包括的なセキュリティ監査完了
 
-### v1.0.0
+### v0.3.0
 - ✅ 基本的なマルチトークン交換機能
 - ✅ Chainlink Oracle対応
 - ✅ ガスレス交換機能
+
+### v0.1.0
+- ✅ NewLo Pointトークン
+- ✅ NLP配布機能
 
 ## 🤝 貢献
 
@@ -252,8 +266,9 @@ MIT License - 詳細は [LICENSE](LICENSE) を参照
 ## 🔗 リンク
 
 - **公式サイト**: [NewLo Official](https://newlo.jp)
+- **公式クエストサイト**: [NewLo Quest](https://app.quest.newlo.jp)
 - **ドキュメント**: [Docs](docs/)
-- **GitHub**: [Repository](https://github.com/newlo-io/newlo-point-contract)
+- **GitHub**: [Repository](https://github.com/k0yote/newlo-point)
 
 ---
 
