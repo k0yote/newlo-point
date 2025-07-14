@@ -281,29 +281,8 @@ contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
             revert InsufficientBalance(symbol, amount, balance);
         }
 
-        // Update user's first-time status
-        bool isFirstTime = userReceivedAmounts[to][symbol] == 0;
-        if (isFirstTime) {
-            token.totalUsers++;
-            if (_isFirstTimeUser(to)) {
-                totalUsers++;
-            }
-        }
-
-        // Update statistics
-        token.totalDistributed += amount;
-        userReceivedAmounts[to][symbol] += amount;
-        totalDistributions++;
-
-        // Add to user's distribution history
-        userDistributionHistory[to].push(
-            DistributionRecord({ amount: amount, timestamp: block.timestamp, tokenSymbol: symbol })
-        );
-
-        // Transfer tokens
-        tokenContract.safeTransfer(to, amount);
-
-        emit TokenDistributed(to, symbol, amount, block.timestamp);
+        // Execute single distribution
+        _executeSingleDistribution(symbol, to, amount, token, tokenContract);
     }
 
     /**
@@ -343,11 +322,8 @@ contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
         TokenInfo storage token = supportedTokens[symbol];
         IERC20 tokenContract = IERC20(token.tokenAddress);
 
-        // Calculate total amount needed
-        uint totalAmount = 0;
-        for (uint i = 0; i < amounts.length; i++) {
-            totalAmount += amounts[i];
-        }
+        // Calculate total amount needed and validate inputs
+        uint totalAmount = _validateAndCalculateBatchAmount(users, amounts);
 
         // Check contract balance
         uint balance = tokenContract.balanceOf(address(this));
@@ -355,49 +331,8 @@ contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
             revert InsufficientBalance(symbol, totalAmount, balance);
         }
 
-        // Cache variables to optimize gas usage in loop
-        uint currentTime = block.timestamp;
-        uint newTotalUsers = 0;
-        uint usersLength = users.length;
-
-        // Execute distributions
-        for (uint i = 0; i < usersLength; i++) {
-            if (users[i] == address(0)) {
-                revert InvalidUser(users[i]);
-            }
-            if (amounts[i] == 0) {
-                revert InvalidAmount(amounts[i]);
-            }
-
-            // Update user's first-time status
-            if (userReceivedAmounts[users[i]][symbol] == 0) {
-                token.totalUsers++;
-                if (_isFirstTimeUser(users[i])) {
-                    newTotalUsers++;
-                }
-            }
-
-            // Update statistics
-            token.totalDistributed += amounts[i];
-            userReceivedAmounts[users[i]][symbol] += amounts[i];
-
-            // Add to user's distribution history
-            userDistributionHistory[users[i]].push(
-                DistributionRecord({
-                    amount: amounts[i],
-                    timestamp: currentTime,
-                    tokenSymbol: symbol
-                })
-            );
-
-            // Transfer tokens
-            tokenContract.safeTransfer(users[i], amounts[i]);
-            emit TokenDistributed(users[i], symbol, amounts[i], currentTime);
-        }
-
-        // Update global counters outside the loop for gas optimization
-        totalDistributions += usersLength;
-        totalUsers += newTotalUsers;
+        // Execute batch distribution
+        _executeBatchDistribution(symbol, users, amounts, token, tokenContract);
 
         emit BatchDistributionCompleted(symbol, totalAmount, users.length);
     }
@@ -574,6 +509,123 @@ contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
         if (amount == 0) {
             revert InvalidAmount(amount);
         }
+    }
+
+    /**
+     * @dev Validate and calculate total amount for batch distribution
+     * @param users Array of recipient addresses
+     * @param amounts Array of amounts to distribute (must match users array length)
+     * @return Total amount to distribute
+     */
+    function _validateAndCalculateBatchAmount(address[] calldata users, uint[] calldata amounts)
+        internal
+        pure
+        returns (uint)
+    {
+        uint totalAmount = 0;
+        for (uint i = 0; i < amounts.length; i++) {
+            if (users[i] == address(0)) {
+                revert InvalidUser(users[i]);
+            }
+            if (amounts[i] == 0) {
+                revert InvalidAmount(amounts[i]);
+            }
+            totalAmount += amounts[i];
+        }
+        return totalAmount;
+    }
+
+    /**
+     * @dev Execute a single distribution
+     * @param symbol Token symbol
+     * @param to Recipient address
+     * @param amount Amount to distribute
+     * @param token TokenInfo struct
+     * @param tokenContract ERC20 token contract
+     */
+    function _executeSingleDistribution(
+        string memory symbol,
+        address to,
+        uint amount,
+        TokenInfo storage token,
+        IERC20 tokenContract
+    ) internal {
+        // Update user's first-time status
+        bool isFirstTime = userReceivedAmounts[to][symbol] == 0;
+        if (isFirstTime) {
+            token.totalUsers++;
+            if (_isFirstTimeUser(to)) {
+                totalUsers++;
+            }
+        }
+
+        // Update statistics
+        token.totalDistributed += amount;
+        userReceivedAmounts[to][symbol] += amount;
+        totalDistributions++;
+
+        // Add to user's distribution history
+        userDistributionHistory[to].push(
+            DistributionRecord({ amount: amount, timestamp: block.timestamp, tokenSymbol: symbol })
+        );
+
+        // Transfer tokens
+        tokenContract.safeTransfer(to, amount);
+
+        emit TokenDistributed(to, symbol, amount, block.timestamp);
+    }
+
+    /**
+     * @dev Execute batch distribution
+     * @param symbol Token symbol
+     * @param users Array of recipient addresses
+     * @param amounts Array of amounts to distribute (must match users array length)
+     * @param token TokenInfo struct
+     * @param tokenContract ERC20 token contract
+     */
+    function _executeBatchDistribution(
+        string memory symbol,
+        address[] calldata users,
+        uint[] calldata amounts,
+        TokenInfo storage token,
+        IERC20 tokenContract
+    ) internal {
+        // Cache variables to optimize gas usage in loop
+        uint currentTime = block.timestamp;
+        uint newTotalUsers = 0;
+        uint usersLength = users.length;
+
+        // Execute distributions
+        for (uint i = 0; i < usersLength; i++) {
+            // Update user's first-time status
+            if (userReceivedAmounts[users[i]][symbol] == 0) {
+                token.totalUsers++;
+                if (_isFirstTimeUser(users[i])) {
+                    newTotalUsers++;
+                }
+            }
+
+            // Update statistics
+            token.totalDistributed += amounts[i];
+            userReceivedAmounts[users[i]][symbol] += amounts[i];
+
+            // Add to user's distribution history
+            userDistributionHistory[users[i]].push(
+                DistributionRecord({
+                    amount: amounts[i],
+                    timestamp: currentTime,
+                    tokenSymbol: symbol
+                })
+            );
+
+            // Transfer tokens
+            tokenContract.safeTransfer(users[i], amounts[i]);
+            emit TokenDistributed(users[i], symbol, amounts[i], currentTime);
+        }
+
+        // Update global counters outside the loop for gas optimization
+        totalDistributions += usersLength;
+        totalUsers += newTotalUsers;
     }
 
     /**
