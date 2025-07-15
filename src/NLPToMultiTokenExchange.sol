@@ -480,7 +480,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Update external price data for a token
+     * @notice Update external price data for a token (maintains backward compatibility)
      * @param tokenType Token type to update
      * @param price New price in USD (18 decimals)
      */
@@ -503,7 +503,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Update external JPY/USD price data
+     * @notice Update external JPY/USD price data (maintains backward compatibility)
      * @param price New JPY/USD price (18 decimals)
      */
     function updateJPYUSDExternalPrice(uint price) external onlyRole(PRICE_UPDATER_ROLE) {
@@ -522,7 +522,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Batch update multiple token prices
+     * @notice Batch update multiple token prices (maintains backward compatibility)
      * @param tokenTypes Array of token types to update
      * @param prices Array of new prices (18 decimals)
      * @param jpyUsdPrice JPY/USD price (18 decimals)
@@ -562,6 +562,104 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             });
 
             emit ExternalPriceUpdated(tokenType, price, block.timestamp, msg.sender);
+        }
+    }
+
+    /**
+     * @notice Convenient function to update external price with 8 decimals (typical Chainlink format)
+     * @param tokenType Token type to update
+     * @param price New price in USD (8 decimals)
+     */
+    function updateExternalPrice8Decimals(TokenType tokenType, uint price)
+        external
+        onlyRole(PRICE_UPDATER_ROLE)
+    {
+        if (price == 0) {
+            revert InvalidPriceUpdate(price);
+        }
+
+        // Convert 8 decimals to 18 decimals
+        uint normalizedPrice = price * (10 ** 10);
+
+        externalPrices[tokenType] = ExternalPriceData({
+            price: normalizedPrice,
+            updatedAt: block.timestamp,
+            updatedBy: msg.sender,
+            isValid: true
+        });
+
+        emit ExternalPriceUpdated(tokenType, normalizedPrice, block.timestamp, msg.sender);
+    }
+
+    /**
+     * @notice Convenient function to update JPY/USD price with 8 decimals (typical Chainlink format)
+     * @param price New JPY/USD price (8 decimals)
+     */
+    function updateJPYUSDExternalPrice8Decimals(uint price) external onlyRole(PRICE_UPDATER_ROLE) {
+        if (price == 0) {
+            revert InvalidPriceUpdate(price);
+        }
+
+        // Convert 8 decimals to 18 decimals
+        uint normalizedPrice = price * (10 ** 10);
+
+        jpyUsdExternalPrice = ExternalPriceData({
+            price: normalizedPrice,
+            updatedAt: block.timestamp,
+            updatedBy: msg.sender,
+            isValid: true
+        });
+
+        emit JPYUSDExternalPriceUpdated(normalizedPrice, block.timestamp, msg.sender);
+    }
+
+    /**
+     * @notice Convenient function to batch update prices with 8 decimals (typical Chainlink format)
+     * @param tokenTypes Array of token types to update
+     * @param prices Array of new prices (8 decimals)
+     * @param jpyUsdPrice JPY/USD price (8 decimals)
+     */
+    function batchUpdatePrices8Decimals(
+        TokenType[] calldata tokenTypes,
+        uint[] calldata prices,
+        uint jpyUsdPrice
+    ) external onlyRole(PRICE_UPDATER_ROLE) {
+        require(tokenTypes.length == prices.length, "Array length mismatch");
+
+        // Update JPY/USD price if provided
+        if (jpyUsdPrice > 0) {
+            // Convert 8 decimals to 18 decimals
+            uint normalizedJpyUsdPrice = jpyUsdPrice * (10 ** 10);
+
+            jpyUsdExternalPrice = ExternalPriceData({
+                price: normalizedJpyUsdPrice,
+                updatedAt: block.timestamp,
+                updatedBy: msg.sender,
+                isValid: true
+            });
+            emit JPYUSDExternalPriceUpdated(normalizedJpyUsdPrice, block.timestamp, msg.sender);
+        }
+
+        // Update token prices
+        for (uint i = 0; i < tokenTypes.length; i++) {
+            TokenType tokenType = tokenTypes[i];
+            uint price = prices[i];
+
+            if (price == 0) {
+                revert InvalidPriceUpdate(price);
+            }
+
+            // Convert 8 decimals to 18 decimals
+            uint normalizedPrice = price * (10 ** 10);
+
+            externalPrices[tokenType] = ExternalPriceData({
+                price: normalizedPrice,
+                updatedAt: block.timestamp,
+                updatedBy: msg.sender,
+                isValid: true
+            });
+
+            emit ExternalPriceUpdated(tokenType, normalizedPrice, block.timestamp, msg.sender);
         }
     }
 
@@ -612,8 +710,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         OperationalFeeConfig memory opFeeConfig = operationalFeeConfigs[tokenType];
 
         // Enhanced calculation with improved precision
-        // Calculate gross amount in USD terms (18 decimals)
-        uint grossAmountInUSD = nlpAmount * priceResult.jpyUsdPrice;
+        // NLP amount (18 decimals) * JPY/USD price (18 decimals) = 36 decimals
+        // We need to normalize to 18 decimals (USD terms)
+        uint grossAmountInUSD = Math.mulDiv(nlpAmount, priceResult.jpyUsdPrice, 1e18);
 
         // Calculate fees in USD terms first to avoid precision loss
         uint exchangeFeeInUSD = (grossAmountInUSD * config.exchangeFee) / 10000;
@@ -630,29 +729,23 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint exchangeFee;
         uint operationalFee;
 
+        // Use Math.mulDiv to maintain precision for small values
         // Adjust for token decimals before division to maintain precision
         if (config.decimals != 18) {
-            if (config.decimals < 18) {
-                uint decimalAdjustment = 10 ** (18 - config.decimals);
-                tokenAmount = netAmountInUSD / (priceResult.tokenUsdPrice * decimalAdjustment);
-                exchangeFee =
-                    Math.mulDiv(exchangeFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment);
-                operationalFee = Math.mulDiv(
-                    operationalFeeInUSD, 1, priceResult.tokenUsdPrice * decimalAdjustment
-                );
-            } else {
-                uint decimalAdjustment = 10 ** (config.decimals - 18);
-                tokenAmount =
-                    Math.mulDiv(netAmountInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
-                exchangeFee =
-                    Math.mulDiv(exchangeFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
-                operationalFee =
-                    Math.mulDiv(operationalFeeInUSD, decimalAdjustment, priceResult.tokenUsdPrice);
-            }
+            // For all non-18 decimal tokens
+            // netAmountInUSD (18 decimals) / tokenUsdPrice (18 decimals) * 10^tokenDecimals = token amount
+            tokenAmount =
+                Math.mulDiv(netAmountInUSD, 10 ** config.decimals, priceResult.tokenUsdPrice);
+            exchangeFee =
+                Math.mulDiv(exchangeFeeInUSD, 10 ** config.decimals, priceResult.tokenUsdPrice);
+            operationalFee =
+                Math.mulDiv(operationalFeeInUSD, 10 ** config.decimals, priceResult.tokenUsdPrice);
         } else {
-            tokenAmount = netAmountInUSD / priceResult.tokenUsdPrice;
-            exchangeFee = exchangeFeeInUSD / priceResult.tokenUsdPrice;
-            operationalFee = operationalFeeInUSD / priceResult.tokenUsdPrice;
+            // For 18 decimals tokens, use Math.mulDiv for better precision
+            // netAmountInUSD (18 decimals) / tokenUsdPrice (18 decimals) * 10^18 = token amount (18 decimals)
+            tokenAmount = Math.mulDiv(netAmountInUSD, 1e18, priceResult.tokenUsdPrice);
+            exchangeFee = Math.mulDiv(exchangeFeeInUSD, 1e18, priceResult.tokenUsdPrice);
+            operationalFee = Math.mulDiv(operationalFeeInUSD, 1e18, priceResult.tokenUsdPrice);
         }
 
         result = TokenAmountResult({

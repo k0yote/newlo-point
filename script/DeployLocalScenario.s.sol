@@ -6,6 +6,7 @@ import { NewLoPointFactory } from "../src/NewLoPointFactory.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { TokenDistributionV2 } from "../src/TokenDistributionV2.sol";
 import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
+import { NLPToMultiTokenExchange } from "../src/NLPToMultiTokenExchange.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
 
 /**
@@ -17,9 +18,11 @@ import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
  *      2. NewLoPointをデプロイ
  *      3. TokenDistributionV2をデプロイ
  *      4. MultiTokenDistributionをデプロイ
- *      5. Mock tokens（USDC、USDT、WETH）をデプロイ
- *      6. NewLoPointの設定（whitelist、transfer control）
- *      7. トークンの付与とロール設定
+ *      5. NLPToMultiTokenExchangeをデプロイ
+ *      6. Mock tokens（USDC、USDT、WETH）をデプロイ
+ *      7. NewLoPointの設定（whitelist、transfer control）
+ *      8. NLPToMultiTokenExchangeの設定（トークン設定、価格設定）
+ *      9. トークンの付与とロール設定
  *
  * @dev 使用方法:
  *      forge script script/DeployLocalScenario.s.sol:DeployLocalScenario --fork-url http://localhost:8545 --broadcast
@@ -36,6 +39,7 @@ contract DeployLocalScenario is Script {
     NewLoPoint public nlpToken;
     TokenDistributionV2 public tokenDistV2;
     MultiTokenDistribution public multiTokenDist;
+    NLPToMultiTokenExchange public nlpExchange;
 
     // Mock tokens
     ERC20DecimalsWithMint public usdcToken;
@@ -68,13 +72,19 @@ contract DeployLocalScenario is Script {
         // 4. MultiTokenDistributionをデプロイ
         _deployMultiTokenDistribution();
 
-        // 5. Mock tokensをデプロイ
+        // 5. NLPToMultiTokenExchangeをデプロイ
+        _deployNLPToMultiTokenExchange();
+
+        // 6. Mock tokensをデプロイ
         _deployMockTokens();
 
-        // 6. NewLoPointの設定
+        // 7. NewLoPointの設定
         _configureNewLoPoint();
 
-        // 7. トークンの付与とロール設定
+        // 8. NLPToMultiTokenExchangeの設定
+        _configureNLPToMultiTokenExchange();
+
+        // 9. トークンの付与とロール設定
         _setupTokensAndRoles();
 
         vm.stopBroadcast();
@@ -131,6 +141,21 @@ contract DeployLocalScenario is Script {
         );
     }
 
+    function _deployNLPToMultiTokenExchange() internal {
+        console.log("\n=== DEPLOYING NLP TO MULTI TOKEN EXCHANGE ===");
+
+        // ローカル環境ではChainlinkのprice feedはないので、address(0)を設定
+        nlpExchange = new NLPToMultiTokenExchange(
+            address(nlpToken),
+            address(0), // No JPY/USD price feed in local environment
+            ADMIN
+        );
+
+        console.log("NLPToMultiTokenExchange deployed at:", address(nlpExchange));
+        console.log("NLP Token address:", address(nlpExchange.nlpToken()));
+        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+    }
+
     function _deployMockTokens() internal {
         console.log("\n=== DEPLOYING MOCK TOKENS ===");
 
@@ -172,6 +197,10 @@ contract DeployLocalScenario is Script {
         nlpToken.setWhitelistedAddress(address(multiTokenDist), true);
         console.log("Added MultiTokenDistribution to whitelist");
 
+        // NLPToMultiTokenExchangeをwhitelistに追加
+        nlpToken.setWhitelistedAddress(address(nlpExchange), true);
+        console.log("Added NLPToMultiTokenExchange to whitelist");
+
         // Whitelist機能をオン
         nlpToken.setWhitelistModeEnabled(true);
         console.log("Enabled whitelist mode");
@@ -179,6 +208,103 @@ contract DeployLocalScenario is Script {
         // Transfer機能をオン（後で必要に応じてオフにできる）
         nlpToken.setTransfersEnabled(true);
         console.log("Enabled transfers");
+
+        vm.stopBroadcast();
+        vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
+    }
+
+    function _configureNLPToMultiTokenExchange() internal {
+        console.log("\n=== CONFIGURING NLP TO MULTI TOKEN EXCHANGE ===");
+
+        vm.stopBroadcast();
+        uint adminPrivateKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d; // account[1]
+        vm.startBroadcast(adminPrivateKey);
+
+        // ETHトークンの設定
+        nlpExchange.configureToken(
+            NLPToMultiTokenExchange.TokenType.ETH,
+            address(0), // ETH
+            address(0), // No oracle in local environment
+            18, // ETH decimals
+            100, // 1% exchange fee
+            "ETH"
+        );
+        console.log("Configured ETH token");
+
+        // USDCトークンの設定
+        nlpExchange.configureToken(
+            NLPToMultiTokenExchange.TokenType.USDC,
+            address(usdcToken),
+            address(0), // No oracle in local environment
+            6, // USDC decimals
+            100, // 1% exchange fee
+            "USDC"
+        );
+        console.log("Configured USDC token");
+
+        // USDTトークンの設定
+        nlpExchange.configureToken(
+            NLPToMultiTokenExchange.TokenType.USDT,
+            address(usdtToken),
+            address(0), // No oracle in local environment
+            6, // USDT decimals
+            100, // 1% exchange fee
+            "USDT"
+        );
+        console.log("Configured USDT token");
+
+        // 運営手数料の設定（各トークンに対して0.5%）
+        nlpExchange.configureOperationalFee(
+            NLPToMultiTokenExchange.TokenType.ETH,
+            50, // 0.5% operational fee
+            ADMIN, // Fee recipient
+            true // Enabled
+        );
+
+        nlpExchange.configureOperationalFee(
+            NLPToMultiTokenExchange.TokenType.USDC,
+            50, // 0.5% operational fee
+            ADMIN, // Fee recipient
+            true // Enabled
+        );
+
+        nlpExchange.configureOperationalFee(
+            NLPToMultiTokenExchange.TokenType.USDT,
+            50, // 0.5% operational fee
+            ADMIN, // Fee recipient
+            true // Enabled
+        );
+        console.log("Configured operational fees");
+
+        // 外部価格データの設定（テスト用の価格）
+        // JPY/USD価格を設定（例：1 USD = 150 JPY → 1 JPY = 0.006667 USD）
+        nlpExchange.updateJPYUSDExternalPrice(6667000000000000); // 0.006667 USD (18 decimals)
+        console.log("Updated JPY/USD external price");
+
+        // ETH/USD価格を設定（例：1 ETH = 2000 USD）
+        nlpExchange.updateExternalPrice(
+            NLPToMultiTokenExchange.TokenType.ETH,
+            2000000000000000000000 // 2000 USD (18 decimals)
+        );
+        console.log("Updated ETH/USD external price");
+
+        // USDC/USD価格を設定（例：1 USDC = 1 USD）
+        nlpExchange.updateExternalPrice(
+            NLPToMultiTokenExchange.TokenType.USDC,
+            1000000000000000000 // 1 USD (18 decimals)
+        );
+        console.log("Updated USDC/USD external price");
+
+        // USDT/USD価格を設定（例：1 USDT = 1 USD）
+        nlpExchange.updateExternalPrice(
+            NLPToMultiTokenExchange.TokenType.USDT,
+            1000000000000000000 // 1 USD (18 decimals)
+        );
+        console.log("Updated USDT/USD external price");
+
+        // treasuryアドレスを設定
+        nlpExchange.setTreasury(ADMIN);
+        console.log("Set treasury address");
 
         vm.stopBroadcast();
         vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
@@ -195,6 +321,8 @@ contract DeployLocalScenario is Script {
         nlpToken.grantRole(nlpToken.MINTER_ROLE(), DEPLOYER);
         console.log("Granted MINTER_ROLE to deployer");
 
+        // NLPToMultiTokenExchangeは burnFrom を使用するため、特別なロールは不要
+
         vm.stopBroadcast();
         vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
 
@@ -206,6 +334,26 @@ contract DeployLocalScenario is Script {
         // MultiTokenDistributionに10000 NLPを付与
         nlpToken.mint(address(multiTokenDist), amount);
         console.log("Minted 10000 NLP to MultiTokenDistribution");
+
+        // NLPToMultiTokenExchangeに供給用のトークンを付与
+        // ETHをコントラクトに送金（10 ETH）
+        (bool sent,) = address(nlpExchange).call{ value: 10 ether }("");
+        require(sent, "ETH transfer failed");
+        console.log("Sent 10 ETH to NLPToMultiTokenExchange");
+
+        // USDCトークンを作成してNLPToMultiTokenExchangeに送金（100,000 USDC）
+        usdcToken.mint(address(nlpExchange), 100000 * 10 ** 6);
+        console.log("Minted 100,000 USDC to NLPToMultiTokenExchange");
+
+        // USDTトークンを作成してNLPToMultiTokenExchangeに送金（100,000 USDT）
+        usdtToken.mint(address(nlpExchange), 100000 * 10 ** 6);
+        console.log("Minted 100,000 USDT to NLPToMultiTokenExchange");
+
+        // テスト用ユーザーにNLPを付与
+        nlpToken.mint(ADMIN, 1000 * 10 ** 18);
+        nlpToken.mint(PAUSER, 1000 * 10 ** 18);
+        nlpToken.mint(MINTER, 1000 * 10 ** 18);
+        console.log("Minted 1000 NLP to test users");
 
         // TokenDistributionV2にMINTER_ROLEを付与
         vm.stopBroadcast();
@@ -230,6 +378,7 @@ contract DeployLocalScenario is Script {
         console.log("NewLoPoint:", address(nlpToken));
         console.log("TokenDistributionV2:", address(tokenDistV2));
         console.log("MultiTokenDistribution:", address(multiTokenDist));
+        console.log("NLPToMultiTokenExchange:", address(nlpExchange));
         console.log("USDC Mock Token:", address(usdcToken));
         console.log("USDT Mock Token:", address(usdtToken));
         console.log("WETH Mock Token:", address(wethToken));
@@ -243,16 +392,26 @@ contract DeployLocalScenario is Script {
         console.log(
             "MultiTokenDist Whitelisted:", nlpToken.whitelistedAddresses(address(multiTokenDist))
         );
+        console.log("NLPExchange Whitelisted:", nlpToken.whitelistedAddresses(address(nlpExchange)));
         console.log("TokenDistV2 Balance:", nlpToken.balanceOf(address(tokenDistV2)) / 10 ** 18);
         console.log(
             "MultiTokenDist Balance:", nlpToken.balanceOf(address(multiTokenDist)) / 10 ** 18
         );
+
+        console.log("\n=== NLP TO MULTI TOKEN EXCHANGE STATUS ===");
+        console.log("Contract Address:", address(nlpExchange));
+        console.log("ETH Balance:", address(nlpExchange).balance / 10 ** 18);
+        console.log("USDC Balance:", usdcToken.balanceOf(address(nlpExchange)) / 10 ** 6);
+        console.log("USDT Balance:", usdtToken.balanceOf(address(nlpExchange)) / 10 ** 6);
+        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+        console.log("Treasury Address:", nlpExchange.treasury());
 
         console.log("\n=== ROLES ===");
         console.log(
             "NLP MINTER_ROLE for TokenDistV2:",
             nlpToken.hasRole(nlpToken.MINTER_ROLE(), address(tokenDistV2))
         );
+        // NLPToMultiTokenExchangeは burnFrom を使用（役割ベース確認なし）
         console.log(
             "TokenDistV2 DISTRIBUTOR_ROLE for Admin:",
             tokenDistV2.hasRole(tokenDistV2.DISTRIBUTOR_ROLE(), ADMIN)
@@ -265,6 +424,11 @@ contract DeployLocalScenario is Script {
         console.log("USDC Supply:", usdcToken.totalSupply());
         console.log("USDT Supply:", usdtToken.totalSupply());
         console.log("WETH Supply:", wethToken.totalSupply());
+
+        console.log("\n=== TEST USER BALANCES ===");
+        console.log("Admin NLP Balance:", nlpToken.balanceOf(ADMIN) / 10 ** 18);
+        console.log("Pauser NLP Balance:", nlpToken.balanceOf(PAUSER) / 10 ** 18);
+        console.log("Minter NLP Balance:", nlpToken.balanceOf(MINTER) / 10 ** 18);
 
         console.log("\n=== USEFUL CAST COMMANDS ===");
         console.log("Grant MINTER_ROLE to address:");
@@ -280,6 +444,22 @@ contract DeployLocalScenario is Script {
         console.log("\nAdd address to whitelist:");
         console.log(
             "cast send [NLP_TOKEN] \"setWhitelistedAddress(address,bool)\" [ADDRESS] true --private-key [ADMIN_KEY]"
+        );
+
+        console.log("\nExchange NLP for ETH:");
+        console.log(
+            "cast send [NLP_EXCHANGE] \"exchangeNLP(uint8,uint256)\" 0 \"100000000000000000000\" --private-key [USER_KEY]"
+        );
+        console.log("# TokenType: ETH=0, USDC=1, USDT=2");
+
+        console.log("\nGet exchange quote:");
+        console.log(
+            "cast call [NLP_EXCHANGE] \"getExchangeQuote(uint8,uint256)\" 0 \"100000000000000000000\""
+        );
+
+        console.log("\nUpdate external price:");
+        console.log(
+            "cast send [NLP_EXCHANGE] \"updateExternalPrice(uint8,uint256)\" 0 \"2000000000000000000000\" --private-key [ADMIN_KEY]"
         );
 
         console.log("\nMint mock tokens (USDC/USDT/WETH):");
@@ -305,6 +485,16 @@ contract DeployLocalScenario is Script {
 
         console.log("Check whitelist status:");
         console.log("cast call", address(nlpToken), '"whitelistedAddresses(address)"', "<ADDRESS>");
+
+        console.log("Check NLP Exchange ETH balance:");
+        console.log("cast balance [NLP_EXCHANGE_ADDRESS]");
+        console.log("NLP_EXCHANGE_ADDRESS:", address(nlpExchange));
+
+        console.log("Check exchange quote for 100 NLP to ETH:");
+        console.log(
+            "cast call [NLP_EXCHANGE_ADDRESS] \"getExchangeQuote(uint8,uint256)\" 0 \"100000000000000000000\""
+        );
+        console.log("NLP_EXCHANGE_ADDRESS:", address(nlpExchange));
 
         console.log("========================");
     }

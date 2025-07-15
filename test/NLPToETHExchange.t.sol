@@ -23,7 +23,7 @@ contract NLPToETHExchangeTest is Test {
 
     uint8 constant PRICE_FEED_DECIMALS = 8;
     int constant INITIAL_ETH_USD_PRICE = 2000_00000000; // $2000
-    int constant INITIAL_JPY_USD_PRICE = 670000; // ¥1 = $0.0067 (8 decimals)
+    int constant INITIAL_JPY_USD_PRICE = 677093; // ¥1 = $0.00677093 (8 decimals) - actual Chainlink data
     uint constant INITIAL_ETH_BALANCE = 100 ether;
     uint constant USER_NLP_BALANCE = 10000 * 10 ** 18;
 

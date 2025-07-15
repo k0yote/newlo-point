@@ -112,7 +112,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         usdtToken = new MockToken("Tether USD", "USDT", 6);
 
         // Deploy mock price feeds
-        jpyUsdPriceFeed = new MockV3Aggregator(JPY_USD_DECIMALS, 0.0067e8); // 1 JPY = 0.0067 USD
+        jpyUsdPriceFeed = new MockV3Aggregator(JPY_USD_DECIMALS, 677093); // 1 JPY = 0.00677093 USD (actual Chainlink data)
         ethUsdPriceFeed = new MockV3Aggregator(ETH_USD_DECIMALS, 2500e8); // 1 ETH = 2500 USD
         usdcUsdPriceFeed = new MockV3Aggregator(USDC_USD_DECIMALS, 1e8); // 1 USDC = 1 USD
         usdtUsdPriceFeed = new MockV3Aggregator(USDT_USD_DECIMALS, 1e8); // 1 USDT = 1 USD
@@ -870,6 +870,148 @@ contract NLPToMultiTokenExchangeTest is Test {
         vm.expectRevert();
         exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
         vm.stopPrank();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                           8 DECIMALS PRICE UPDATE TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function testUpdateExternalPrice8Decimals() public {
+        // Use actual Chainlink 8 decimals format
+        uint priceIn8Decimals = 250000000000; // $2500 ETH in 8 decimals
+        uint expectedPrice18Decimals = 2500e18; // Expected conversion to 18 decimals
+
+        vm.prank(priceUpdater);
+        exchange.updateExternalPrice8Decimals(
+            NLPToMultiTokenExchange.TokenType.ETH, priceIn8Decimals
+        );
+
+        (uint price,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
+        assertEq(price, expectedPrice18Decimals, "8 decimals price not converted correctly");
+    }
+
+    function testUpdateJPYUSDExternalPrice8Decimals() public {
+        // Use actual Chainlink JPY/USD data
+        uint jpyPriceIn8Decimals = 677093; // 0.00677093 USD in 8 decimals
+        uint expectedPrice18Decimals = 6770930000000000; // Expected conversion to 18 decimals
+
+        vm.prank(priceUpdater);
+        exchange.updateJPYUSDExternalPrice8Decimals(jpyPriceIn8Decimals);
+
+        (uint price,,,) = exchange.jpyUsdExternalPrice();
+        assertEq(price, expectedPrice18Decimals, "8 decimals JPY/USD price not converted correctly");
+    }
+
+    function testBatchUpdatePrices8Decimals() public {
+        NLPToMultiTokenExchange.TokenType[] memory tokenTypes =
+            new NLPToMultiTokenExchange.TokenType[](2);
+        tokenTypes[0] = NLPToMultiTokenExchange.TokenType.USDC;
+        tokenTypes[1] = NLPToMultiTokenExchange.TokenType.USDT;
+
+        uint[] memory pricesIn8Decimals = new uint[](2);
+        pricesIn8Decimals[0] = 100000000; // $1.00 USDC in 8 decimals
+        pricesIn8Decimals[1] = 99000000; // $0.99 USDT in 8 decimals
+
+        uint jpyUsdPriceIn8Decimals = 677093; // Actual Chainlink JPY/USD
+
+        vm.prank(priceUpdater);
+        exchange.batchUpdatePrices8Decimals(tokenTypes, pricesIn8Decimals, jpyUsdPriceIn8Decimals);
+
+        // Check converted prices
+        (uint usdcPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDC);
+        (uint usdtPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDT);
+        (uint jpyPrice,,,) = exchange.jpyUsdExternalPrice();
+
+        assertEq(usdcPrice, 1e18, "USDC price not converted correctly");
+        assertEq(usdtPrice, 0.99e18, "USDT price not converted correctly");
+        assertEq(jpyPrice, 6770930000000000, "JPY/USD price not converted correctly");
+    }
+
+    function testDecimalConversionAccuracy() public {
+        // Test various 8 decimal values for accuracy
+        uint[] memory testValues8Decimals = new uint[](5);
+        testValues8Decimals[0] = 1; // Smallest unit
+        testValues8Decimals[1] = 100000000; // $1.00
+        testValues8Decimals[2] = 250000000000; // $2500
+        testValues8Decimals[3] = 677093; // Actual JPY/USD
+        testValues8Decimals[4] = 123456789; // Random value
+
+        uint[] memory expectedValues18Decimals = new uint[](5);
+        expectedValues18Decimals[0] = 10000000000; // 1 * 10^10
+        expectedValues18Decimals[1] = 1e18; // 1 * 10^18
+        expectedValues18Decimals[2] = 2500e18; // 2500 * 10^18
+        expectedValues18Decimals[3] = 6770930000000000; // 677093 * 10^10
+        expectedValues18Decimals[4] = 1234567890000000000; // 123456789 * 10^10
+
+        for (uint i = 0; i < testValues8Decimals.length; i++) {
+            vm.prank(priceUpdater);
+            exchange.updateExternalPrice8Decimals(
+                NLPToMultiTokenExchange.TokenType.ETH, testValues8Decimals[i]
+            );
+
+            (uint price,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
+            assertEq(price, expectedValues18Decimals[i], "Decimal conversion failed for test case");
+        }
+    }
+
+    function testBackwardCompatibility() public {
+        // Test that both 8 decimals and 18 decimals functions work
+        uint price8Decimals = 250000000000; // $2500 in 8 decimals
+        uint price18Decimals = 2500e18; // $2500 in 18 decimals
+
+        // Update with 8 decimals function
+        vm.prank(priceUpdater);
+        exchange.updateExternalPrice8Decimals(NLPToMultiTokenExchange.TokenType.ETH, price8Decimals);
+
+        (uint result1,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
+
+        // Update with 18 decimals function
+        vm.prank(priceUpdater);
+        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, price18Decimals);
+
+        (uint result2,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
+
+        // Both should result in the same final value
+        assertEq(
+            result1, result2, "8 decimals and 18 decimals functions should produce same result"
+        );
+        assertEq(result1, price18Decimals, "Final price should be in 18 decimals format");
+    }
+
+    function testExchangeWithRealChainlinkData() public {
+        // Test exchange using actual Chainlink data format
+        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
+
+        // Update prices using 8 decimals format (actual Chainlink format)
+        vm.startPrank(priceUpdater);
+        exchange.updateExternalPrice8Decimals(NLPToMultiTokenExchange.TokenType.ETH, 250000000000); // $2500 ETH
+        exchange.updateJPYUSDExternalPrice8Decimals(677093); // Actual JPY/USD rate
+        vm.stopPrank();
+
+        // Get quote and verify calculation
+        (uint tokenAmount, uint tokenUsdRate, uint jpyUsdRate,,,) =
+            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+
+        // Verify rates are properly converted to 18 decimals
+        assertEq(tokenUsdRate, 2500e18, "ETH/USD rate should be 2500 in 18 decimals");
+        assertEq(jpyUsdRate, 6770930000000000, "JPY/USD rate should be converted to 18 decimals");
+
+        // Verify token amount calculation
+        // 1000 NLP * 0.00677093 USD/JPY / 2500 USD/ETH = 0.002708372 ETH
+        // Accounting for 1% fee: 0.002708372 * 0.99 = 0.00268128828 ETH
+        assertTrue(tokenAmount > 0, "Should receive ETH tokens");
+
+        // Execute the actual exchange
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        vm.stopPrank();
+
+        // Verify exchange was successful
+        NLPToMultiTokenExchange.TokenStats memory stats =
+            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
+        assertEq(stats.exchangeCount, 1, "Exchange should have been executed");
+        assertEq(stats.totalExchanged, nlpAmount, "Total exchanged should match");
     }
 
     receive() external payable { }
