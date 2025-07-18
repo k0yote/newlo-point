@@ -157,9 +157,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice External JPY/USD round data (used when jpyUsdPriceFeed is address(0))
     RoundData public jpyUsdExternalRoundData;
 
-    /// @notice Whether JPY/USD oracle is available
-    bool public immutable hasJpyOracle;
-
     /// @notice Treasury address for emergency withdrawals
     address public treasury;
 
@@ -335,9 +332,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         if (_jpyUsdPriceFeed != address(0)) {
             jpyUsdPriceFeed = AggregatorV3Interface(_jpyUsdPriceFeed);
-            hasJpyOracle = true;
-        } else {
-            hasJpyOracle = false;
         }
 
         if (_usdcUsdPriceFeed != address(0)) {
@@ -1195,7 +1189,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      */
     function _getJPYUSDPrice() public view returns (uint price, PriceSource source) {
         // Try Chainlink oracle first
-        if (hasJpyOracle) {
+        if (address(jpyUsdPriceFeed) != address(0)) {
             try this.getOraclePrice(address(jpyUsdPriceFeed), 18) returns (uint oraclePrice) {
                 return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
             } catch {

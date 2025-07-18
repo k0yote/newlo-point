@@ -201,7 +201,7 @@ contract NLPToMultiTokenExchangeTest is Test {
     function testInitialConfiguration() public view {
         assertEq(address(exchange.nlpToken()), address(nlpToken));
         assertEq(address(exchange.jpyUsdPriceFeed()), address(jpyUsdPriceFeed));
-        assertTrue(exchange.hasJpyOracle());
+        assertTrue(address(exchange.jpyUsdPriceFeed()) != address(0));
         assertTrue(exchange.hasRole(exchange.DEFAULT_ADMIN_ROLE(), owner));
         assertTrue(exchange.hasRole(exchange.CONFIG_MANAGER_ROLE(), owner));
         assertTrue(exchange.hasRole(exchange.PRICE_UPDATER_ROLE(), priceUpdater));

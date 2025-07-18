@@ -164,7 +164,7 @@ contract DeployLocalScenario is Script {
 
         console.log("NLPToMultiTokenExchange deployed at:", address(nlpExchange));
         console.log("NLP Token address:", address(nlpExchange.nlpToken()));
-        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+        console.log("Has JPY Oracle:", address(nlpExchange.jpyUsdPriceFeed()) != address(0));
     }
 
     function _deployMockTokens() internal {
@@ -428,7 +428,7 @@ contract DeployLocalScenario is Script {
         console.log("ETH Balance:", address(nlpExchange).balance / 10 ** 18);
         console.log("USDC Balance:", usdcToken.balanceOf(address(nlpExchange)) / 10 ** 6);
         console.log("USDT Balance:", usdtToken.balanceOf(address(nlpExchange)) / 10 ** 6);
-        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+        console.log("Has JPY Oracle:", address(nlpExchange.jpyUsdPriceFeed()) != address(0));
         console.log("Treasury Address:", nlpExchange.treasury());
 
         console.log("\n=== ROLES ===");
