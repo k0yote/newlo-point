@@ -77,6 +77,15 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                                   STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
 
+    /// @notice Round data structure matching Chainlink's latestRoundData
+    struct RoundData {
+        uint80 roundId;
+        int answer;
+        uint startedAt;
+        uint updatedAt;
+        uint80 answeredInRound;
+    }
+
     /// @notice Token configuration
     struct TokenConfig {
         address tokenAddress; // Token contract address (address(0) for ETH)
@@ -133,8 +142,20 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice NewLo Point token contract
     IERC20Extended public immutable nlpToken;
 
-    /// @notice Chainlink JPY/USD price feed (if available)
-    AggregatorV3Interface public immutable jpyUsdPriceFeed;
+    /// @notice Chainlink ETH/USD price feed (always required)
+    AggregatorV3Interface public immutable ethUsdPriceFeed;
+
+    /// @notice Chainlink JPY/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public jpyUsdPriceFeed;
+
+    /// @notice Chainlink USDC/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public usdcUsdPriceFeed;
+
+    /// @notice Chainlink USDT/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public usdtUsdPriceFeed;
+
+    /// @notice External JPY/USD round data (used when jpyUsdPriceFeed is address(0))
+    RoundData public jpyUsdExternalRoundData;
 
     /// @notice Whether JPY/USD oracle is available
     bool public immutable hasJpyOracle;
@@ -253,6 +274,15 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice Emitted when treasury address is updated
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
+    /// @notice Emitted when JPY/USD oracle address is updated
+    event JPYUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
+
+    /// @notice Emitted when USDC/USD oracle address is updated
+    event USDCUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
+
+    /// @notice Emitted when USDT/USD oracle address is updated
+    event USDTUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
+
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -273,6 +303,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error InvalidFeeRecipient(address recipient);
     error InsufficientOperationalFee(TokenType tokenType, uint required, uint available);
     error InvalidMaxFee(uint fee, uint absoluteMaxFee);
+    error OracleAvailableForToken(TokenType tokenType);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -281,20 +312,40 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @notice Initialize the multi-token exchange contract
      * @param _nlpToken NewLo Point token contract address
+     * @param _ethUsdPriceFeed Chainlink ETH/USD price feed address (required)
      * @param _jpyUsdPriceFeed Chainlink JPY/USD price feed address (address(0) if not available)
+     * @param _usdcUsdPriceFeed Chainlink USDC/USD price feed address (address(0) if not available)
+     * @param _usdtUsdPriceFeed Chainlink USDT/USD price feed address (address(0) if not available)
      * @param _initialAdmin Initial admin of the contract
      */
-    constructor(address _nlpToken, address _jpyUsdPriceFeed, address _initialAdmin) {
+    constructor(
+        address _nlpToken,
+        address _ethUsdPriceFeed,
+        address _jpyUsdPriceFeed,
+        address _usdcUsdPriceFeed,
+        address _usdtUsdPriceFeed,
+        address _initialAdmin
+    ) {
         require(_nlpToken != address(0), "NLP token address cannot be zero");
+        require(_ethUsdPriceFeed != address(0), "ETH/USD price feed cannot be zero");
         require(_initialAdmin != address(0), "Initial admin cannot be zero");
 
         nlpToken = IERC20Extended(_nlpToken);
+        ethUsdPriceFeed = AggregatorV3Interface(_ethUsdPriceFeed);
 
         if (_jpyUsdPriceFeed != address(0)) {
             jpyUsdPriceFeed = AggregatorV3Interface(_jpyUsdPriceFeed);
             hasJpyOracle = true;
         } else {
             hasJpyOracle = false;
+        }
+
+        if (_usdcUsdPriceFeed != address(0)) {
+            usdcUsdPriceFeed = AggregatorV3Interface(_usdcUsdPriceFeed);
+        }
+
+        if (_usdtUsdPriceFeed != address(0)) {
+            usdtUsdPriceFeed = AggregatorV3Interface(_usdtUsdPriceFeed);
         }
 
         // Set up access control roles
@@ -519,6 +570,94 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         });
 
         emit JPYUSDExternalPriceUpdated(price, block.timestamp, msg.sender);
+    }
+
+    /**
+     * @notice Update JPY/USD external data in latestRoundData format (recommended for Soneium)
+     * @param roundId Round ID
+     * @param answer Price answer (8 decimals, like Chainlink format)
+     * @param startedAt Round start timestamp
+     * @param updatedAt Round update timestamp
+     * @param answeredInRound Answered in round
+     * @dev This function provides JPY/USD data in the same format as Chainlink oracles
+     */
+    function updateJPYUSDRoundData(
+        uint80 roundId,
+        int answer,
+        uint startedAt,
+        uint updatedAt,
+        uint80 answeredInRound
+    ) external onlyRole(PRICE_UPDATER_ROLE) {
+        require(answer > 0, "Invalid price answer");
+        require(updatedAt > 0, "Invalid update timestamp");
+        require(startedAt > 0, "Invalid start timestamp");
+
+        jpyUsdExternalRoundData = RoundData({
+            roundId: roundId,
+            answer: answer,
+            startedAt: startedAt,
+            updatedAt: updatedAt,
+            answeredInRound: answeredInRound
+        });
+
+        emit JPYUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
+    }
+
+    /**
+     * @notice Update JPY/USD oracle address (for future oracle support)
+     * @param newJpyUsdPriceFeed New JPY/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the JPY/USD oracle when it becomes available on Soneium
+     */
+    function updateJPYUSDOracle(address newJpyUsdPriceFeed) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        address oldOracle = address(jpyUsdPriceFeed);
+
+        if (newJpyUsdPriceFeed != address(0)) {
+            jpyUsdPriceFeed = AggregatorV3Interface(newJpyUsdPriceFeed);
+        } else {
+            jpyUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit JPYUSDOracleUpdated(oldOracle, newJpyUsdPriceFeed);
+    }
+
+    /**
+     * @notice Update USDC/USD oracle address
+     * @param newUsdcUsdPriceFeed New USDC/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the USDC/USD oracle address
+     */
+    function updateUSDCUSDOracle(address newUsdcUsdPriceFeed)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address oldOracle = address(usdcUsdPriceFeed);
+
+        if (newUsdcUsdPriceFeed != address(0)) {
+            usdcUsdPriceFeed = AggregatorV3Interface(newUsdcUsdPriceFeed);
+        } else {
+            usdcUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit USDCUSDOracleUpdated(oldOracle, newUsdcUsdPriceFeed);
+    }
+
+    /**
+     * @notice Update USDT/USD oracle address
+     * @param newUsdtUsdPriceFeed New USDT/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the USDT/USD oracle address
+     */
+    function updateUSDTUSDOracle(address newUsdtUsdPriceFeed)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address oldOracle = address(usdtUsdPriceFeed);
+
+        if (newUsdtUsdPriceFeed != address(0)) {
+            usdtUsdPriceFeed = AggregatorV3Interface(newUsdtUsdPriceFeed);
+        } else {
+            usdtUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit USDTUSDOracleUpdated(oldOracle, newUsdtUsdPriceFeed);
     }
 
     /**
@@ -964,6 +1103,67 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         view
         returns (uint price, PriceSource source)
     {
+        // Special handling for ETH - use dedicated ETH/USD oracle first, then fallback to external data
+        if (tokenType == TokenType.ETH) {
+            try this.getOraclePrice(address(ethUsdPriceFeed), 18) returns (uint oraclePrice) {
+                return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+            } catch {
+                // Oracle failed, fall back to external data for ETH
+                ExternalPriceData memory ethExternalData = externalPrices[tokenType];
+                if (
+                    ethExternalData.isValid
+                        && block.timestamp - ethExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
+                ) {
+                    return (ethExternalData.price, PriceSource.EXTERNAL_DATA);
+                }
+                // No valid price data available
+                revert NoPriceDataAvailable(tokenType);
+            }
+        }
+
+        // Special handling for USDC - use dedicated USDC/USD oracle first, then fallback to external data
+        if (tokenType == TokenType.USDC) {
+            if (address(usdcUsdPriceFeed) != address(0)) {
+                try this.getOraclePrice(address(usdcUsdPriceFeed), 18) returns (uint oraclePrice) {
+                    return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                } catch {
+                    // Oracle failed, fall back to external data
+                }
+            }
+            // Use external data
+            ExternalPriceData memory usdcExternalData = externalPrices[tokenType];
+            if (
+                usdcExternalData.isValid
+                    && block.timestamp - usdcExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
+            ) {
+                return (usdcExternalData.price, PriceSource.EXTERNAL_DATA);
+            }
+            // No valid price data available
+            revert NoPriceDataAvailable(tokenType);
+        }
+
+        // Special handling for USDT - use dedicated USDT/USD oracle first, then fallback to external data
+        if (tokenType == TokenType.USDT) {
+            if (address(usdtUsdPriceFeed) != address(0)) {
+                try this.getOraclePrice(address(usdtUsdPriceFeed), 18) returns (uint oraclePrice) {
+                    return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                } catch {
+                    // Oracle failed, fall back to external data
+                }
+            }
+            // Use external data
+            ExternalPriceData memory usdtExternalData = externalPrices[tokenType];
+            if (
+                usdtExternalData.isValid
+                    && block.timestamp - usdtExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
+            ) {
+                return (usdtExternalData.price, PriceSource.EXTERNAL_DATA);
+            }
+            // No valid price data available
+            revert NoPriceDataAvailable(tokenType);
+        }
+
+        // For other tokens, use the existing logic
         TokenConfig memory config = tokenConfigs[tokenType];
 
         // Try Chainlink oracle first
@@ -1003,7 +1203,19 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             }
         }
 
-        // Use external data
+        // Use external round data (latestRoundData format)
+        RoundData memory externalRoundData = jpyUsdExternalRoundData;
+        if (
+            externalRoundData.updatedAt > 0
+                && block.timestamp - externalRoundData.updatedAt <= PRICE_STALENESS_THRESHOLD
+                && externalRoundData.answer > 0
+        ) {
+            // Convert answer to 18 decimals (assume 8 decimals input like Chainlink)
+            uint priceIn18Decimals = uint(externalRoundData.answer) * (10 ** 10);
+            return (priceIn18Decimals, PriceSource.EXTERNAL_DATA);
+        }
+
+        // Fallback to legacy external data if available
         ExternalPriceData memory externalData = jpyUsdExternalPrice;
         if (
             externalData.isValid
@@ -1179,6 +1391,34 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     {
         exchangedNLP = userExchangeAmount[user][tokenType];
         receivedTokens = userTokenReceived[user][tokenType];
+    }
+
+    /**
+     * @notice Get JPY/USD external round data
+     * @return Round data structure matching Chainlink's latestRoundData
+     * @dev This function returns the external JPY/USD data in latestRoundData format
+     */
+    function getJPYUSDExternalRoundData() external view returns (RoundData memory) {
+        return jpyUsdExternalRoundData;
+    }
+
+    /**
+     * @notice Get latest ETH/USD price from dedicated oracle
+     * @return price ETH/USD price (18 decimals)
+     * @dev This function always uses the dedicated ETH/USD oracle
+     */
+    function getLatestETHPrice() external view returns (uint price) {
+        return this.getOraclePrice(address(ethUsdPriceFeed), 18);
+    }
+
+    /**
+     * @notice Get latest JPY/USD price from best available source
+     * @return price JPY/USD price (18 decimals)
+     * @return source Price data source used
+     * @dev This function uses oracle if available, otherwise external round data
+     */
+    function getLatestJPYPrice() external view returns (uint price, PriceSource source) {
+        return _getJPYUSDPrice();
     }
 
     /* ═══════════════════════════════════════════════════════════════════════

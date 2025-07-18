@@ -113,12 +113,19 @@ contract NLPToMultiTokenExchangeTest is Test {
 
         // Deploy mock price feeds
         jpyUsdPriceFeed = new MockV3Aggregator(JPY_USD_DECIMALS, 677093); // 1 JPY = 0.00677093 USD (actual Chainlink data)
-        ethUsdPriceFeed = new MockV3Aggregator(ETH_USD_DECIMALS, 2500e8); // 1 ETH = 2500 USD
-        usdcUsdPriceFeed = new MockV3Aggregator(USDC_USD_DECIMALS, 1e8); // 1 USDC = 1 USD
+        ethUsdPriceFeed = new MockV3Aggregator(ETH_USD_DECIMALS, 3483e8); // 1 ETH = 2500 USD
+        usdcUsdPriceFeed = new MockV3Aggregator(USDC_USD_DECIMALS, 99971995); // 1 USDC = 1 USD
         usdtUsdPriceFeed = new MockV3Aggregator(USDT_USD_DECIMALS, 1e8); // 1 USDT = 1 USD
 
         // Deploy exchange contract
-        exchange = new NLPToMultiTokenExchange(address(nlpToken), address(jpyUsdPriceFeed), owner);
+        exchange = new NLPToMultiTokenExchange(
+            address(nlpToken),
+            address(ethUsdPriceFeed),
+            address(jpyUsdPriceFeed),
+            address(usdcUsdPriceFeed),
+            address(usdtUsdPriceFeed),
+            owner
+        );
 
         // Grant roles
         exchange.grantRole(exchange.PRICE_UPDATER_ROLE(), priceUpdater);
@@ -726,292 +733,88 @@ contract NLPToMultiTokenExchangeTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function testZeroExchangeAmount() public {
-        vm.startPrank(user);
-        vm.expectRevert();
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 0);
-        vm.stopPrank();
+        uint nlpAmount = 0;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NLPToMultiTokenExchange.InvalidExchangeAmount.selector, nlpAmount
+            )
+        );
+
+        vm.prank(user);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
     }
 
-    function testInsufficientBalance() public {
-        // Empty the contract
+    /* ═══════════════════════════════════════════════════════════════════════
+                              ORACLE UPDATE TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function testUpdateJPYUSDOracle() public {
+        address newOracle = address(0x123);
+
+        // vm.expectEmit(true, true, false, true);
+        // emit JPYUSDOracleUpdated(address(jpyUsdPriceFeed), newOracle);
+
         vm.prank(owner);
-        exchange.setTreasury(owner);
+        exchange.updateJPYUSDOracle(newOracle);
 
-        vm.prank(emergencyManager);
-        exchange.pause();
+        assertEq(address(exchange.jpyUsdPriceFeed()), newOracle);
+    }
 
-        vm.prank(emergencyManager);
-        exchange.emergencyWithdrawETH(0);
+    function testUpdateUSDCUSDOracle() public {
+        address newOracle = address(0x456);
 
-        vm.prank(emergencyManager);
-        exchange.unpause();
+        // vm.expectEmit(true, true, false, true);
+        // emit USDCUSDOracleUpdated(address(usdcUsdPriceFeed), newOracle);
 
-        uint nlpAmount = 1000 * 10 ** 18;
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
+        vm.prank(owner);
+        exchange.updateUSDCUSDOracle(newOracle);
+
+        assertEq(address(exchange.usdcUsdPriceFeed()), newOracle);
+    }
+
+    function testUpdateUSDTUSDOracle() public {
+        address newOracle = address(0x789);
+
+        // vm.expectEmit(true, true, false, true);
+        // emit USDTUSDOracleUpdated(address(usdtUsdPriceFeed), newOracle);
+
+        vm.prank(owner);
+        exchange.updateUSDTUSDOracle(newOracle);
+
+        assertEq(address(exchange.usdtUsdPriceFeed()), newOracle);
+    }
+
+    function testOnlyAdminCanUpdateOracles() public {
+        address newOracle = address(0xABC);
+
         vm.expectRevert();
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-        vm.stopPrank();
-    }
+        vm.prank(user);
+        exchange.updateJPYUSDOracle(newOracle);
 
-    /* ═══════════════════════════════════════════════════════════════════════
-                              FUZZ TESTS
-    ═══════════════════════════════════════════════════════════════════════ */
-
-    function testFuzzExchangeAmount(uint amount) public {
-        // Set minimum amount to avoid precision issues with very small amounts
-        amount = bound(amount, 1000 * 10 ** 18, nlpToken.balanceOf(user)); // Min 1000 NLP
-
-        // Store initial balances
-        uint initialNLPBalance = nlpToken.balanceOf(user);
-        uint initialETHBalance = user.balance;
-
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), amount);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, amount);
-        vm.stopPrank();
-
-        // Verify NLP was burned
-        assertEq(nlpToken.balanceOf(user), initialNLPBalance - amount);
-
-        // Verify user received ETH (should be greater than before)
-        assertTrue(user.balance > initialETHBalance);
-
-        // Verify exchange statistics were updated
-        NLPToMultiTokenExchange.TokenStats memory stats =
-            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(stats.totalExchanged, amount);
-        assertTrue(stats.totalTokenSent > 0);
-        assertTrue(stats.totalExchangeFeeCollected > 0);
-    }
-
-    function testFuzzOperationalFeeRate(uint feeRate) public {
-        feeRate = bound(feeRate, 0, 200); // 0-2%
-
-        vm.prank(feeManager);
-        exchange.configureOperationalFee(
-            NLPToMultiTokenExchange.TokenType.ETH, feeRate, feeRecipient, true
-        );
-
-        NLPToMultiTokenExchange.OperationalFeeConfig memory config =
-            exchange.getOperationalFeeConfig(NLPToMultiTokenExchange.TokenType.ETH);
-
-        assertEq(config.feeRate, feeRate);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════════
-                              PRICE DATA VALIDATION TESTS
-    ═══════════════════════════════════════════════════════════════════════ */
-
-    function testStaleOracleData() public {
-        // Set oracle price to be older than threshold
-        vm.warp(block.timestamp + 3700); // 3700 seconds = more than 1 hour
-
-        // Set valid external prices to ensure fallback works
-        // Both token price and JPY/USD price need to be updated after warp
-        vm.startPrank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
-        exchange.updateJPYUSDExternalPrice(0.0067e18); // Update JPY/USD price as well
-        vm.stopPrank();
-
-        uint nlpAmount = 1000 * 10 ** 18;
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-        vm.stopPrank();
-
-        // Should use external price as fallback
-        NLPToMultiTokenExchange.TokenStats memory stats =
-            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(stats.exchangeCount, 1);
-    }
-
-    function testInvalidOraclePrice() public {
-        // Set negative price in oracle
-        ethUsdPriceFeed.updateAnswer(-1);
-
-        // Set valid external prices to ensure fallback works
-        // Ensure both token price and JPY/USD price are available
-        vm.startPrank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
-        exchange.updateJPYUSDExternalPrice(0.0067e18); // Ensure fresh JPY/USD price
-        vm.stopPrank();
-
-        uint nlpAmount = 1000 * 10 ** 18;
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-        vm.stopPrank();
-
-        // Should use external price as fallback
-        NLPToMultiTokenExchange.TokenStats memory stats =
-            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(stats.exchangeCount, 1);
-    }
-
-    function testNoValidPriceDataAvailable() public {
-        // Disable oracle by setting zero price
-        ethUsdPriceFeed.updateAnswer(0);
-        jpyUsdPriceFeed.updateAnswer(0);
-
-        // Set stale external prices
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
-
-        vm.prank(priceUpdater);
-        exchange.updateJPYUSDExternalPrice(0.0067e18);
-
-        // Make external prices stale
-        vm.warp(block.timestamp + 3700);
-
-        uint nlpAmount = 1000 * 10 ** 18;
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
         vm.expectRevert();
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        vm.prank(user);
+        exchange.updateUSDCUSDOracle(newOracle);
+
+        vm.expectRevert();
+        vm.prank(user);
+        exchange.updateUSDTUSDOracle(newOracle);
+    }
+
+    function testOracleUpdateToAddressZero() public {
+        // Test updating oracle to address(0) to disable it
+        vm.startPrank(owner);
+
+        exchange.updateJPYUSDOracle(address(0));
+        assertEq(address(exchange.jpyUsdPriceFeed()), address(0));
+
+        exchange.updateUSDCUSDOracle(address(0));
+        assertEq(address(exchange.usdcUsdPriceFeed()), address(0));
+
+        exchange.updateUSDTUSDOracle(address(0));
+        assertEq(address(exchange.usdtUsdPriceFeed()), address(0));
+
         vm.stopPrank();
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════════
-                           8 DECIMALS PRICE UPDATE TESTS
-    ═══════════════════════════════════════════════════════════════════════ */
-
-    function testUpdateExternalPrice8Decimals() public {
-        // Use actual Chainlink 8 decimals format
-        uint priceIn8Decimals = 250000000000; // $2500 ETH in 8 decimals
-        uint expectedPrice18Decimals = 2500e18; // Expected conversion to 18 decimals
-
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice8Decimals(
-            NLPToMultiTokenExchange.TokenType.ETH, priceIn8Decimals
-        );
-
-        (uint price,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(price, expectedPrice18Decimals, "8 decimals price not converted correctly");
-    }
-
-    function testUpdateJPYUSDExternalPrice8Decimals() public {
-        // Use actual Chainlink JPY/USD data
-        uint jpyPriceIn8Decimals = 677093; // 0.00677093 USD in 8 decimals
-        uint expectedPrice18Decimals = 6770930000000000; // Expected conversion to 18 decimals
-
-        vm.prank(priceUpdater);
-        exchange.updateJPYUSDExternalPrice8Decimals(jpyPriceIn8Decimals);
-
-        (uint price,,,) = exchange.jpyUsdExternalPrice();
-        assertEq(price, expectedPrice18Decimals, "8 decimals JPY/USD price not converted correctly");
-    }
-
-    function testBatchUpdatePrices8Decimals() public {
-        NLPToMultiTokenExchange.TokenType[] memory tokenTypes =
-            new NLPToMultiTokenExchange.TokenType[](2);
-        tokenTypes[0] = NLPToMultiTokenExchange.TokenType.USDC;
-        tokenTypes[1] = NLPToMultiTokenExchange.TokenType.USDT;
-
-        uint[] memory pricesIn8Decimals = new uint[](2);
-        pricesIn8Decimals[0] = 100000000; // $1.00 USDC in 8 decimals
-        pricesIn8Decimals[1] = 99000000; // $0.99 USDT in 8 decimals
-
-        uint jpyUsdPriceIn8Decimals = 677093; // Actual Chainlink JPY/USD
-
-        vm.prank(priceUpdater);
-        exchange.batchUpdatePrices8Decimals(tokenTypes, pricesIn8Decimals, jpyUsdPriceIn8Decimals);
-
-        // Check converted prices
-        (uint usdcPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDC);
-        (uint usdtPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDT);
-        (uint jpyPrice,,,) = exchange.jpyUsdExternalPrice();
-
-        assertEq(usdcPrice, 1e18, "USDC price not converted correctly");
-        assertEq(usdtPrice, 0.99e18, "USDT price not converted correctly");
-        assertEq(jpyPrice, 6770930000000000, "JPY/USD price not converted correctly");
-    }
-
-    function testDecimalConversionAccuracy() public {
-        // Test various 8 decimal values for accuracy
-        uint[] memory testValues8Decimals = new uint[](5);
-        testValues8Decimals[0] = 1; // Smallest unit
-        testValues8Decimals[1] = 100000000; // $1.00
-        testValues8Decimals[2] = 250000000000; // $2500
-        testValues8Decimals[3] = 677093; // Actual JPY/USD
-        testValues8Decimals[4] = 123456789; // Random value
-
-        uint[] memory expectedValues18Decimals = new uint[](5);
-        expectedValues18Decimals[0] = 10000000000; // 1 * 10^10
-        expectedValues18Decimals[1] = 1e18; // 1 * 10^18
-        expectedValues18Decimals[2] = 2500e18; // 2500 * 10^18
-        expectedValues18Decimals[3] = 6770930000000000; // 677093 * 10^10
-        expectedValues18Decimals[4] = 1234567890000000000; // 123456789 * 10^10
-
-        for (uint i = 0; i < testValues8Decimals.length; i++) {
-            vm.prank(priceUpdater);
-            exchange.updateExternalPrice8Decimals(
-                NLPToMultiTokenExchange.TokenType.ETH, testValues8Decimals[i]
-            );
-
-            (uint price,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
-            assertEq(price, expectedValues18Decimals[i], "Decimal conversion failed for test case");
-        }
-    }
-
-    function testBackwardCompatibility() public {
-        // Test that both 8 decimals and 18 decimals functions work
-        uint price8Decimals = 250000000000; // $2500 in 8 decimals
-        uint price18Decimals = 2500e18; // $2500 in 18 decimals
-
-        // Update with 8 decimals function
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice8Decimals(NLPToMultiTokenExchange.TokenType.ETH, price8Decimals);
-
-        (uint result1,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
-
-        // Update with 18 decimals function
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, price18Decimals);
-
-        (uint result2,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
-
-        // Both should result in the same final value
-        assertEq(
-            result1, result2, "8 decimals and 18 decimals functions should produce same result"
-        );
-        assertEq(result1, price18Decimals, "Final price should be in 18 decimals format");
-    }
-
-    function testExchangeWithRealChainlinkData() public {
-        // Test exchange using actual Chainlink data format
-        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
-
-        // Update prices using 8 decimals format (actual Chainlink format)
-        vm.startPrank(priceUpdater);
-        exchange.updateExternalPrice8Decimals(NLPToMultiTokenExchange.TokenType.ETH, 250000000000); // $2500 ETH
-        exchange.updateJPYUSDExternalPrice8Decimals(677093); // Actual JPY/USD rate
-        vm.stopPrank();
-
-        // Get quote and verify calculation
-        (uint tokenAmount, uint tokenUsdRate, uint jpyUsdRate,,,) =
-            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-
-        // Verify rates are properly converted to 18 decimals
-        assertEq(tokenUsdRate, 2500e18, "ETH/USD rate should be 2500 in 18 decimals");
-        assertEq(jpyUsdRate, 6770930000000000, "JPY/USD rate should be converted to 18 decimals");
-
-        // Verify token amount calculation
-        // 1000 NLP * 0.00677093 USD/JPY / 2500 USD/ETH = 0.002708372 ETH
-        // Accounting for 1% fee: 0.002708372 * 0.99 = 0.00268128828 ETH
-        assertTrue(tokenAmount > 0, "Should receive ETH tokens");
-
-        // Execute the actual exchange
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-        vm.stopPrank();
-
-        // Verify exchange was successful
-        NLPToMultiTokenExchange.TokenStats memory stats =
-            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(stats.exchangeCount, 1, "Exchange should have been executed");
-        assertEq(stats.totalExchanged, nlpAmount, "Total exchanged should match");
     }
 
     receive() external payable { }

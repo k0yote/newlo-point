@@ -123,7 +123,7 @@ contract NLPToETHExchangeTest is Test {
         assertEq(exchange.userExchangeAmount(user1), nlpAmount, "User exchange amount not updated");
     }
 
-    function test_ExchangeQuote() public {
+    function test_ExchangeQuote() public view {
         uint nlpAmount = 1000 * 10 ** 18;
 
         (uint ethAmount, uint ethUsdRate, uint jpyUsdRate, uint fee) =

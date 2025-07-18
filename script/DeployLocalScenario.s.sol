@@ -8,6 +8,7 @@ import { TokenDistributionV2 } from "../src/TokenDistributionV2.sol";
 import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
 import { NLPToMultiTokenExchange } from "../src/NLPToMultiTokenExchange.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
+import { MockV3Aggregator } from "../src/mocks/MockV3Aggregator.sol";
 
 /**
  * @title DeployLocalScenario
@@ -46,6 +47,10 @@ contract DeployLocalScenario is Script {
     ERC20DecimalsWithMint public usdtToken;
     ERC20DecimalsWithMint public wethToken;
 
+    // Mock price feed aggregators
+    MockV3Aggregator public ethUsdPriceFeed;
+    MockV3Aggregator public jpyUsdPriceFeed;
+
     function run() external {
         console.log("=== LOCAL SCENARIO DEPLOYMENT ===");
         console.log("Deployer:", DEPLOYER);
@@ -71,6 +76,9 @@ contract DeployLocalScenario is Script {
 
         // 4. MultiTokenDistributionをデプロイ
         _deployMultiTokenDistribution();
+
+        // 4.5. Mock price feedsをデプロイ
+        _deployMockPriceFeeds();
 
         // 5. NLPToMultiTokenExchangeをデプロイ
         _deployNLPToMultiTokenExchange();
@@ -144,10 +152,13 @@ contract DeployLocalScenario is Script {
     function _deployNLPToMultiTokenExchange() internal {
         console.log("\n=== DEPLOYING NLP TO MULTI TOKEN EXCHANGE ===");
 
-        // ローカル環境ではChainlinkのprice feedはないので、address(0)を設定
+        // ローカル環境ではChainlinkのprice feedはないので、mock aggregatorsを使用
         nlpExchange = new NLPToMultiTokenExchange(
             address(nlpToken),
+            address(ethUsdPriceFeed), // Use mock ETH/USD price feed
             address(0), // No JPY/USD price feed in local environment
+            address(0), // No USDC/USD price feed in local environment (could add mock if needed)
+            address(0), // No USDT/USD price feed in local environment (could add mock if needed)
             ADMIN
         );
 
@@ -179,6 +190,20 @@ contract DeployLocalScenario is Script {
         console.log("WETH name:", wethToken.name());
         console.log("WETH symbol:", wethToken.symbol());
         console.log("WETH decimals:", wethToken.decimals());
+    }
+
+    function _deployMockPriceFeeds() internal {
+        console.log("\n=== DEPLOYING MOCK PRICE FEEDS ===");
+
+        // Deploy ETH/USD mock price feed (8 decimals)
+        ethUsdPriceFeed = new MockV3Aggregator(8, 200000000000); // 2000 USD (8 decimals: 2000.00000000)
+        console.log("ETH/USD Price Feed deployed at:", address(ethUsdPriceFeed));
+        console.log("ETH/USD Price:", ethUsdPriceFeed.latestAnswer());
+
+        // Deploy JPY/USD mock price feed (8 decimals)
+        jpyUsdPriceFeed = new MockV3Aggregator(8, 677093); // 0.00677093 USD (8 decimals: 0.00677093)
+        console.log("JPY/USD Price Feed deployed at:", address(jpyUsdPriceFeed));
+        console.log("JPY/USD Price:", jpyUsdPriceFeed.latestAnswer());
     }
 
     function _configureNewLoPoint() internal {
