@@ -123,7 +123,7 @@ contract NLPToETHExchangeTest is Test {
         assertEq(exchange.userExchangeAmount(user1), nlpAmount, "User exchange amount not updated");
     }
 
-    function test_ExchangeQuote() public {
+    function test_ExchangeQuote() public view {
         uint nlpAmount = 1000 * 10 ** 18;
 
         (uint ethAmount, uint ethUsdRate, uint jpyUsdRate, uint fee) =
@@ -169,10 +169,13 @@ contract NLPToETHExchangeTest is Test {
         uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
         uint deadline = block.timestamp + 1 hours;
 
-        // Calculate expected ETH amount
+        // Calculate expected ETH amount with NLP to JPY rate
         uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
         uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
-        uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+        // Apply NLP to JPY rate: current rate is 90/100 = 0.9
+        uint jpyAmount =
+            (nlpAmount * exchange.getNLPToJPYRate()) / exchange.getNLPToJPYRateDenominator();
+        uint expectedEthAmount = (jpyAmount * jpyUsdPrice) / ethUsdPrice;
 
         // Create permit signature
         (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
@@ -255,10 +258,13 @@ contract NLPToETHExchangeTest is Test {
             userAddress, address(exchange), nlpAmount, deadline, userPrivateKey
         );
 
-        // Calculate expected ETH amount
+        // Calculate expected ETH amount with NLP to JPY rate
         uint ethUsdPrice = uint(INITIAL_ETH_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
         uint jpyUsdPrice = uint(INITIAL_JPY_USD_PRICE) * 10 ** 10; // Convert to 18 decimals
-        uint expectedEthAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+        // Apply NLP to JPY rate: current rate is 90/100 = 0.9
+        uint jpyAmount =
+            (nlpAmount * exchange.getNLPToJPYRate()) / exchange.getNLPToJPYRateDenominator();
+        uint expectedEthAmount = (jpyAmount * jpyUsdPrice) / ethUsdPrice;
 
         // Expect GaslessExchangeExecuted event
         vm.expectEmit(true, true, false, true);
@@ -299,6 +305,85 @@ contract NLPToETHExchangeTest is Test {
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
 
         return vm.sign(privateKey, digest);
+    }
+
+    /**
+     * @notice Test NLP to JPY rate update functionality
+     */
+    function testSetNLPToJPYRate() public {
+        uint newRate = 150; // 1.5 JPY per NLP
+
+        // Only admin (owner) can update rate
+        vm.prank(admin);
+        exchange.setNLPToJPYRate(newRate);
+
+        assertEq(exchange.getNLPToJPYRate(), newRate, "Rate should be updated");
+
+        // Test calculation with new rate
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint jpyAmount = exchange.calculateJPYAmount(nlpAmount);
+        uint expectedJpyAmount = (nlpAmount * newRate) / exchange.getNLPToJPYRateDenominator();
+
+        assertEq(jpyAmount, expectedJpyAmount, "JPY calculation should reflect new rate");
+    }
+
+    /**
+     * @notice Test that only owner can update NLP to JPY rate
+     */
+    function testOnlyOwnerCanSetNLPToJPYRate() public {
+        uint newRate = 150;
+
+        // Non-owner should fail
+        vm.prank(user1);
+        vm.expectRevert();
+        exchange.setNLPToJPYRate(newRate);
+
+        // Admin (owner) should succeed
+        vm.prank(admin);
+        exchange.setNLPToJPYRate(newRate);
+
+        assertEq(exchange.getNLPToJPYRate(), newRate, "Rate should be updated by admin");
+    }
+
+    /**
+     * @notice Test rate validation (zero rate should fail)
+     */
+    function testZeroRateValidation() public {
+        vm.prank(admin);
+        vm.expectRevert("Rate must be positive");
+        exchange.setNLPToJPYRate(0);
+    }
+
+    /**
+     * @notice Test rate denominator is correctly configured
+     */
+    function testRateDenominator() public view {
+        uint denominator = exchange.getNLPToJPYRateDenominator();
+        assertEq(denominator, 100, "Rate denominator should be 100");
+    }
+
+    /**
+     * @notice Test exchange calculation with different rates
+     */
+    function testExchangeWithDifferentRates() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Test with rate = 50 (0.5 JPY per NLP)
+        vm.prank(admin);
+        exchange.setNLPToJPYRate(50);
+
+        (uint ethAmount1,,,) = exchange.getExchangeQuote(nlpAmount);
+
+        // Test with rate = 200 (2.0 JPY per NLP)
+        vm.prank(admin);
+        exchange.setNLPToJPYRate(200);
+
+        (uint ethAmount2,,,) = exchange.getExchangeQuote(nlpAmount);
+
+        // Higher rate should give more ETH (200/50 = 4x more)
+        assertApproxEqRel(
+            ethAmount2, ethAmount1 * 4, 0.001e18, "Higher rate should give proportionally more ETH"
+        );
     }
 
     receive() external payable { }

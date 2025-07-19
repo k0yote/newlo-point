@@ -25,11 +25,11 @@ contract DeployMultiTokenExchange is Script {
     address constant SONEIUM_USDC_TOKEN = 0x0000000000000000000000000000000000000000; // Replace with actual USDC
     address constant SONEIUM_USDT_TOKEN = 0x0000000000000000000000000000000000000000; // Replace with actual USDT
 
-    // Oracle addresses (may be zero if not available on Soneium)
-    address constant SONEIUM_JPY_USD_ORACLE = address(0); // No oracle available on Soneium
-    address constant SONEIUM_ETH_USD_ORACLE = address(0); // No oracle available on Soneium
-    address constant SONEIUM_USDC_USD_ORACLE = address(0); // No oracle available on Soneium
-    address constant SONEIUM_USDT_USD_ORACLE = address(0); // No oracle available on Soneium
+    // Oracle addresses (ETH/USD available on Soneium, JPY/USD not available)
+    address constant SONEIUM_JPY_USD_ORACLE = address(0); // No oracle available on Soneium yet
+    address constant SONEIUM_ETH_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual ETH/USD oracle on Soneium
+    address constant SONEIUM_USDC_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual USDC/USD oracle on Soneium
+    address constant SONEIUM_USDT_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual USDT/USD oracle on Soneium
 
     function run() external {
         uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -52,8 +52,14 @@ contract DeployMultiTokenExchange is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy the exchange contract
-        NLPToMultiTokenExchange exchange =
-            new NLPToMultiTokenExchange(SONEIUM_NLP_TOKEN, SONEIUM_JPY_USD_ORACLE, SONEIUM_ADMIN);
+        NLPToMultiTokenExchange exchange = new NLPToMultiTokenExchange(
+            SONEIUM_NLP_TOKEN,
+            SONEIUM_ETH_USD_ORACLE,
+            SONEIUM_JPY_USD_ORACLE,
+            SONEIUM_USDC_USD_ORACLE,
+            SONEIUM_USDT_USD_ORACLE,
+            SONEIUM_ADMIN
+        );
 
         console.log("NLPToMultiTokenExchange deployed at:", address(exchange));
 
@@ -136,13 +142,17 @@ contract DeployMultiTokenExchange is Script {
         require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
         require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        exchange.updateJPYUSDExternalPrice(jpyUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, ethUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDC, usdcUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDT, usdtUsdPrice);
-
-        console.log("Initial external prices set");
-        console.log("WARNING: Update prices with current market values before enabling exchanges!");
+        // Convert 18 decimals to 8 decimals for Chainlink format
+        exchange.updateJPYUSDRoundData(
+            1, // roundId
+            int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles");
+        console.log("WARNING: Ensure oracles are working properly before enabling exchanges!");
 
         vm.stopBroadcast();
 
@@ -197,7 +207,10 @@ contract DeployMultiTokenExchangeLocal is Script {
         // Deploy the exchange contract
         NLPToMultiTokenExchange exchange = new NLPToMultiTokenExchange(
             address(nlpToken),
+            address(0), // No ETH/USD oracle in local test
             address(0), // No JPY/USD oracle
+            address(0), // No USDC/USD oracle in local test
+            address(0), // No USDT/USD oracle in local test
             deployer
         );
 
@@ -271,12 +284,16 @@ contract DeployMultiTokenExchangeLocal is Script {
         require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
         require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        exchange.updateJPYUSDExternalPrice(jpyUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, ethUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDC, usdcUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDT, usdtUsdPrice);
-
-        console.log("Initial external prices set for local testing");
+        // Convert 18 decimals to 8 decimals for Chainlink format
+        exchange.updateJPYUSDRoundData(
+            1, // roundId
+            int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles for local testing");
 
         // Fund the exchange contract with test liquidity
         uint ethAmount = 10 ether;

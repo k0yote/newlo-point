@@ -8,6 +8,7 @@ import { TokenDistributionV2 } from "../src/TokenDistributionV2.sol";
 import { MultiTokenDistribution } from "../src/MultiTokenDistribution.sol";
 import { NLPToMultiTokenExchange } from "../src/NLPToMultiTokenExchange.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
+import { MockV3Aggregator } from "../src/mocks/MockV3Aggregator.sol";
 
 /**
  * @title DeployLocalScenario
@@ -46,6 +47,10 @@ contract DeployLocalScenario is Script {
     ERC20DecimalsWithMint public usdtToken;
     ERC20DecimalsWithMint public wethToken;
 
+    // Mock price feed aggregators
+    MockV3Aggregator public ethUsdPriceFeed;
+    MockV3Aggregator public jpyUsdPriceFeed;
+
     function run() external {
         console.log("=== LOCAL SCENARIO DEPLOYMENT ===");
         console.log("Deployer:", DEPLOYER);
@@ -71,6 +76,9 @@ contract DeployLocalScenario is Script {
 
         // 4. MultiTokenDistributionをデプロイ
         _deployMultiTokenDistribution();
+
+        // 4.5. Mock price feedsをデプロイ
+        _deployMockPriceFeeds();
 
         // 5. NLPToMultiTokenExchangeをデプロイ
         _deployNLPToMultiTokenExchange();
@@ -144,16 +152,19 @@ contract DeployLocalScenario is Script {
     function _deployNLPToMultiTokenExchange() internal {
         console.log("\n=== DEPLOYING NLP TO MULTI TOKEN EXCHANGE ===");
 
-        // ローカル環境ではChainlinkのprice feedはないので、address(0)を設定
+        // ローカル環境ではChainlinkのprice feedはないので、mock aggregatorsを使用
         nlpExchange = new NLPToMultiTokenExchange(
             address(nlpToken),
+            address(ethUsdPriceFeed), // Use mock ETH/USD price feed
             address(0), // No JPY/USD price feed in local environment
+            address(0), // No USDC/USD price feed in local environment (could add mock if needed)
+            address(0), // No USDT/USD price feed in local environment (could add mock if needed)
             ADMIN
         );
 
         console.log("NLPToMultiTokenExchange deployed at:", address(nlpExchange));
         console.log("NLP Token address:", address(nlpExchange.nlpToken()));
-        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+        console.log("Has JPY Oracle:", address(nlpExchange.jpyUsdPriceFeed()) != address(0));
     }
 
     function _deployMockTokens() internal {
@@ -179,6 +190,20 @@ contract DeployLocalScenario is Script {
         console.log("WETH name:", wethToken.name());
         console.log("WETH symbol:", wethToken.symbol());
         console.log("WETH decimals:", wethToken.decimals());
+    }
+
+    function _deployMockPriceFeeds() internal {
+        console.log("\n=== DEPLOYING MOCK PRICE FEEDS ===");
+
+        // Deploy ETH/USD mock price feed (8 decimals)
+        ethUsdPriceFeed = new MockV3Aggregator(8, 200000000000); // 2000 USD (8 decimals: 2000.00000000)
+        console.log("ETH/USD Price Feed deployed at:", address(ethUsdPriceFeed));
+        console.log("ETH/USD Price:", ethUsdPriceFeed.latestAnswer());
+
+        // Deploy JPY/USD mock price feed (8 decimals)
+        jpyUsdPriceFeed = new MockV3Aggregator(8, 677093); // 0.00677093 USD (8 decimals: 0.00677093)
+        console.log("JPY/USD Price Feed deployed at:", address(jpyUsdPriceFeed));
+        console.log("JPY/USD Price:", jpyUsdPriceFeed.latestAnswer());
     }
 
     function _configureNewLoPoint() internal {
@@ -278,29 +303,19 @@ contract DeployLocalScenario is Script {
 
         // 外部価格データの設定（テスト用の価格）
         // JPY/USD価格を設定（例：1 USD = 150 JPY → 1 JPY = 0.006667 USD）
-        nlpExchange.updateJPYUSDExternalPrice(6667000000000000); // 0.006667 USD (18 decimals)
+        // Using Chainlink format: 8 decimals = 66670000 (0.6667 cents per JPY)
+        nlpExchange.updateJPYUSDRoundData(
+            1, // roundId
+            66670000, // answer: 0.006667 USD in 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
         console.log("Updated JPY/USD external price");
 
-        // ETH/USD価格を設定（例：1 ETH = 2000 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.ETH,
-            2000000000000000000000 // 2000 USD (18 decimals)
-        );
-        console.log("Updated ETH/USD external price");
-
-        // USDC/USD価格を設定（例：1 USDC = 1 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.USDC,
-            1000000000000000000 // 1 USD (18 decimals)
-        );
-        console.log("Updated USDC/USD external price");
-
-        // USDT/USD価格を設定（例：1 USDT = 1 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.USDT,
-            1000000000000000000 // 1 USD (18 decimals)
-        );
-        console.log("Updated USDT/USD external price");
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        // No external price setting required for these tokens
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles");
 
         // treasuryアドレスを設定
         nlpExchange.setTreasury(ADMIN);
@@ -403,7 +418,7 @@ contract DeployLocalScenario is Script {
         console.log("ETH Balance:", address(nlpExchange).balance / 10 ** 18);
         console.log("USDC Balance:", usdcToken.balanceOf(address(nlpExchange)) / 10 ** 6);
         console.log("USDT Balance:", usdtToken.balanceOf(address(nlpExchange)) / 10 ** 6);
-        console.log("Has JPY Oracle:", nlpExchange.hasJpyOracle());
+        console.log("Has JPY Oracle:", address(nlpExchange.jpyUsdPriceFeed()) != address(0));
         console.log("Treasury Address:", nlpExchange.treasury());
 
         console.log("\n=== ROLES ===");

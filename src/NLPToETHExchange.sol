@@ -15,7 +15,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  * @dev This contract allows users to exchange NLP tokens for ETH using real-time price feeds
  *
  * @dev Key Features:
- *      - 1:1 NLP to JPY exchange rate
+ *      - Configurable NLP to JPY exchange rate
  *      - Real-time ETH/USD and JPY/USD price conversion using Chainlink oracles
  *      - Configurable exchange fees
  *      - Emergency pause functionality
@@ -23,10 +23,10 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *      - Comprehensive exchange statistics
  *
  * @dev Exchange Formula:
- *      1. NLP → JPY (1:1 ratio)
+ *      1. NLP → JPY (configurable rate using numerator/denominator)
  *      2. JPY → USD using JPY/USD price feed
  *      3. USD → ETH using ETH/USD price feed
- *      Formula: ethAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice - fees
+ *      Formula: ethAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / ethUsdPrice - fees
  *
  * @dev Security Features:
  *      - Reentrancy protection
@@ -53,14 +53,17 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
                                 CONSTANTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Exchange rate: 1 NLP = 1 JPY
-    uint public constant NLP_TO_JPY_RATE = 1;
+    /// @notice Exchange rate numerator: NLP to JPY (90 for 0.9 JPY per NLP)
+    uint public NLP_TO_JPY_RATE = 90;
 
     /// @notice Price data staleness threshold (1 hour)
     uint public constant PRICE_STALENESS_THRESHOLD = 3600;
 
     /// @notice Maximum exchange fee (5%)
     uint public constant MAX_FEE = 500;
+
+    /// @notice Rate denominator for NLP to JPY conversion (e.g., 100 for 1 NLP = 100 JPY)
+    uint public constant NLP_TO_JPY_RATE_DENOMINATOR = 100;
 
     /* ═══════════════════════════════════════════════════════════════════════
                               MUTABLE STATE
@@ -114,6 +117,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         uint jpyUsdRate,
         uint fee
     );
+
+    /// @notice Emitted when NLP to JPY exchange rate is updated
+    event NLPToJPYRateUpdated(uint oldRate, uint newRate);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
@@ -215,8 +221,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         uint jpyUsdPrice = getLatestJPYPrice();
 
         // Calculate required ETH amount
-        // Formula: ethAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice
-        uint ethAmountBeforeFee = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+        // Formula: ethAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / ethUsdPrice
+        uint jpyAmount = (nlpAmount * NLP_TO_JPY_RATE) / NLP_TO_JPY_RATE_DENOMINATOR;
+        uint ethAmountBeforeFee = (jpyAmount * jpyUsdPrice) / ethUsdPrice;
 
         // Calculate and apply fee
         uint fee = (ethAmountBeforeFee * exchangeFee) / 10000;
@@ -288,8 +295,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         uint jpyUsdPrice = getLatestJPYPrice();
 
         // Calculate required ETH amount
-        // Formula: ethAmount = (nlpAmount * jpyUsdPrice) / ethUsdPrice
-        uint ethAmountBeforeFee = (nlpAmount * jpyUsdPrice) / ethUsdPrice;
+        // Formula: ethAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / ethUsdPrice
+        uint jpyAmount = (nlpAmount * NLP_TO_JPY_RATE) / NLP_TO_JPY_RATE_DENOMINATOR;
+        uint ethAmountBeforeFee = (jpyAmount * jpyUsdPrice) / ethUsdPrice;
 
         // Calculate and apply fee
         uint fee = (ethAmountBeforeFee * exchangeFee) / 10000;
@@ -345,7 +353,8 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         ethUsdRate = getLatestETHPrice();
         jpyUsdRate = getLatestJPYPrice();
 
-        uint ethAmountBeforeFee = (nlpAmount * jpyUsdRate) / ethUsdRate;
+        uint jpyAmount = (nlpAmount * NLP_TO_JPY_RATE) / NLP_TO_JPY_RATE_DENOMINATOR;
+        uint ethAmountBeforeFee = (jpyAmount * jpyUsdRate) / ethUsdRate;
         fee = (ethAmountBeforeFee * exchangeFee) / 10000;
         ethAmount = ethAmountBeforeFee - fee;
     }
@@ -474,6 +483,48 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         exchangeFee = newFee;
 
         emit FeeUpdated(oldFee, newFee);
+    }
+
+    /**
+     * @notice Set NLP to JPY exchange rate numerator (admin only)
+     * @param newRate New exchange rate numerator (e.g., 90 for 0.9 JPY per NLP when denominator is 100)
+     * @dev The actual rate is calculated as: newRate / NLP_TO_JPY_RATE_DENOMINATOR
+     *
+     * Requirements:
+     * - Caller must be owner
+     * - Rate must be positive
+     */
+    function setNLPToJPYRate(uint newRate) external onlyOwner {
+        require(newRate > 0, "Rate must be positive");
+        uint oldRate = NLP_TO_JPY_RATE;
+        NLP_TO_JPY_RATE = newRate;
+        emit NLPToJPYRateUpdated(oldRate, newRate);
+    }
+
+    /**
+     * @notice Get the current NLP to JPY exchange rate numerator
+     * @return rate The current exchange rate numerator
+     */
+    function getNLPToJPYRate() external view returns (uint rate) {
+        return NLP_TO_JPY_RATE;
+    }
+
+    /**
+     * @notice Get the rate denominator for NLP to JPY conversion
+     * @return denominator The rate denominator
+     */
+    function getNLPToJPYRateDenominator() external pure returns (uint denominator) {
+        return NLP_TO_JPY_RATE_DENOMINATOR;
+    }
+
+    /**
+     * @notice Calculate the actual NLP to JPY exchange rate as a decimal
+     * @param nlpAmount Amount of NLP tokens
+     * @return jpyAmount Equivalent JPY amount
+     * @dev For display purposes: actualRate = NLP_TO_JPY_RATE / NLP_TO_JPY_RATE_DENOMINATOR
+     */
+    function calculateJPYAmount(uint nlpAmount) external view returns (uint jpyAmount) {
+        return (nlpAmount * NLP_TO_JPY_RATE) / NLP_TO_JPY_RATE_DENOMINATOR;
     }
 
     /**
