@@ -56,9 +56,6 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
     /// @notice Exchange rate numerator: NLP to JPY (90 for 0.9 JPY per NLP)
     uint public NLP_TO_JPY_RATE = 90;
 
-    /// @notice Price data staleness threshold (1 hour)
-    uint public constant PRICE_STALENESS_THRESHOLD = 3600;
-
     /// @notice Maximum exchange fee (5%)
     uint public constant MAX_FEE = 500;
 
@@ -378,9 +375,7 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
             revert InvalidPriceData(int(priceInt));
         }
 
-        if (block.timestamp - updatedAt > PRICE_STALENESS_THRESHOLD) {
-            revert PriceDataStale(uint(updatedAt), PRICE_STALENESS_THRESHOLD);
-        }
+        // Note: Removed staleness time check to allow flexible oracle update timing
 
         // Convert Chainlink price to 18 decimals
         uint8 decimals = ethUsdPriceFeed.decimals();
@@ -406,9 +401,7 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
             revert InvalidPriceData(int(priceInt));
         }
 
-        if (block.timestamp - updatedAt > PRICE_STALENESS_THRESHOLD) {
-            revert PriceDataStale(uint(updatedAt), PRICE_STALENESS_THRESHOLD);
-        }
+        // Note: Removed staleness time check to allow flexible oracle update timing
 
         // Convert Chainlink price to 18 decimals
         uint8 decimals = jpyUsdPriceFeed.decimals();

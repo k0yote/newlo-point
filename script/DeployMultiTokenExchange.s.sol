@@ -13,23 +13,23 @@ import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
  */
 contract DeployMultiTokenExchange is Script {
     // Soneium mainnet addresses (Update these with actual addresses)
-    address constant SONEIUM_ADMIN = 0x742D35Cc6634c0532925a3b8d91d9128d0c9C3E1; // Replace with actual admin
-    address constant SONEIUM_PRICE_UPDATER = 0x742d35CC6634C0532925a3B8d91D9128d0c9c3e2; // Replace with actual price updater
-    address constant SONEIUM_FEE_MANAGER = 0x742D35CC6634c0532925A3B8D91d9128D0C9c3E3; // Replace with actual fee manager
-    address constant SONEIUM_EMERGENCY_MANAGER = 0x742d35CC6634C0532925A3b8d91d9128D0c9c3E4; // Replace with actual emergency manager
-    address constant SONEIUM_CONFIG_MANAGER = 0x742d35cC6634c0532925a3b8D91D9128D0C9C3E5; // Replace with actual config manager
-    address constant SONEIUM_FEE_RECIPIENT = 0x742d35CC6634c0532925a3B8d91d9128D0c9c3E6; // Replace with actual fee recipient
+    address SONEIUM_ADMIN = vm.envAddress("SONEIUM_ADMIN"); // Replace with actual admin
+    address SONEIUM_PRICE_UPDATER = vm.envAddress("SONEIUM_PRICE_UPDATER"); // Replace with actual price updater
+    address SONEIUM_FEE_MANAGER = vm.envAddress("SONEIUM_FEE_MANAGER"); // Replace with actual fee manager
+    address SONEIUM_EMERGENCY_MANAGER = vm.envAddress("SONEIUM_EMERGENCY_MANAGER"); // Replace with actual emergency manager
+    address SONEIUM_CONFIG_MANAGER = vm.envAddress("SONEIUM_CONFIG_MANAGER"); // Replace with actual config manager
+    address SONEIUM_FEE_RECIPIENT = vm.envAddress("SONEIUM_FEE_RECIPIENT"); // Replace with actual fee recipient
 
     // Token addresses (Update these with actual addresses)
-    address constant SONEIUM_NLP_TOKEN = 0x0000000000000000000000000000000000000000; // Replace with actual NLP token
-    address constant SONEIUM_USDC_TOKEN = 0x0000000000000000000000000000000000000000; // Replace with actual USDC
-    address constant SONEIUM_USDT_TOKEN = 0x0000000000000000000000000000000000000000; // Replace with actual USDT
+    address SONEIUM_NLP_TOKEN = vm.envAddress("SONEIUM_NLP_TOKEN"); // Replace with actual NLP token
+    address SONEIUM_USDC_TOKEN = vm.envAddress("SONEIUM_USDC_TOKEN"); // Replace with actual USDC
+    address SONEIUM_USDT_TOKEN = vm.envAddress("SONEIUM_USDT_TOKEN"); // Replace with actual USDT
 
     // Oracle addresses (ETH/USD available on Soneium, JPY/USD not available)
-    address constant SONEIUM_JPY_USD_ORACLE = address(0); // No oracle available on Soneium yet
-    address constant SONEIUM_ETH_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual ETH/USD oracle on Soneium
-    address constant SONEIUM_USDC_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual USDC/USD oracle on Soneium
-    address constant SONEIUM_USDT_USD_ORACLE = 0x0000000000000000000000000000000000000000; // Replace with actual USDT/USD oracle on Soneium
+    address SONEIUM_JPY_USD_ORACLE = vm.envAddress("SONEIUM_JPY_USD_ORACLE"); // No oracle available on Soneium yet
+    address SONEIUM_ETH_USD_ORACLE = vm.envAddress("SONEIUM_ETH_USD_ORACLE"); // Replace with actual ETH/USD oracle on Soneium
+    address SONEIUM_USDC_USD_ORACLE = vm.envAddress("SONEIUM_USDC_USD_ORACLE"); // Replace with actual USDC/USD oracle on Soneium
+    address SONEIUM_USDT_USD_ORACLE = vm.envAddress("SONEIUM_USDT_USD_ORACLE"); // Replace with actual USDT/USD oracle on Soneium
 
     function run() external {
         uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
