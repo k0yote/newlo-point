@@ -19,7 +19,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  * @dev Key Features:
  *      - 1:1 NLP to JPY exchange rate
  *      - Multi-token support (ETH, USDC, USDT)
- *      - Flexible price data management (Chainlink oracles + external/batch updates)
+ *      - Oracle-based price management with JPY/USD external data support
  *      - Role-based access control for different administrative functions
  *      - Configurable exchange fees per token
  *      - Operational fee collection system
@@ -35,9 +35,8 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *      Formula: tokenAmount = (nlpAmount * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
  *
  * @dev Price Data Sources:
- *      - Chainlink Oracle (when available)
- *      - External price data (batch updates by admin)
- *      - Fallback to external data when oracle fails
+ *      - Chainlink Oracle for ETH/USDC/USDT (when available)
+ *      - External JPY/USD data in Chainlink format (for Soneium environment)
  *
  * @dev Security Features:
  *      - Reentrancy protection
@@ -66,12 +65,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         USDT
     }
 
-    /// @notice Price data source types
-    enum PriceSource {
-        CHAINLINK_ORACLE,
-        EXTERNAL_DATA,
-        FALLBACK
-    }
+
 
     /* ═══════════════════════════════════════════════════════════════════════
                                   STRUCTS
@@ -125,7 +119,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     struct PriceCalculationResult {
         uint tokenUsdPrice; // Token price in USD (18 decimals)
         uint jpyUsdPrice; // JPY/USD price (18 decimals)
-        PriceSource priceSource; // Price source used
     }
 
     /// @notice Token amount calculation result
@@ -220,8 +213,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint tokenUsdRate,
         uint jpyUsdRate,
         uint exchangeFee,
-        uint operationalFee,
-        PriceSource priceSource
+        uint operationalFee
     );
 
     /// @notice Emitted when gasless exchange is executed
@@ -234,8 +226,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint tokenUsdRate,
         uint jpyUsdRate,
         uint exchangeFee,
-        uint operationalFee,
-        PriceSource priceSource
+        uint operationalFee
     );
 
     /// @notice Emitted when token configuration is updated
@@ -619,19 +610,12 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         returns (PriceCalculationResult memory result)
     {
         // Get prices
-        (uint tokenUsdPrice, PriceSource tokenPriceSource) = _getTokenPrice(tokenType);
-        (uint jpyUsdPrice, PriceSource jpyPriceSource) = _getJPYUSDPrice();
-
-        // Use the more reliable price source for the event
-        bool bothOracle = tokenPriceSource == PriceSource.CHAINLINK_ORACLE
-            && jpyPriceSource == PriceSource.CHAINLINK_ORACLE;
-        PriceSource priceSource =
-            bothOracle ? PriceSource.CHAINLINK_ORACLE : PriceSource.EXTERNAL_DATA;
+        uint tokenUsdPrice = _getTokenPrice(tokenType);
+        uint jpyUsdPrice = _getJPYUSDPrice();
 
         result = PriceCalculationResult({
             tokenUsdPrice: tokenUsdPrice,
-            jpyUsdPrice: jpyUsdPrice,
-            priceSource: priceSource
+            jpyUsdPrice: jpyUsdPrice
         });
     }
 
@@ -769,8 +753,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                 priceResult.tokenUsdPrice,
                 priceResult.jpyUsdPrice,
                 amountResult.exchangeFee,
-                amountResult.operationalFee,
-                priceResult.priceSource
+                amountResult.operationalFee
             );
         } else {
             emit GaslessExchangeExecuted(
@@ -782,8 +765,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                 priceResult.tokenUsdPrice,
                 priceResult.jpyUsdPrice,
                 amountResult.exchangeFee,
-                amountResult.operationalFee,
-                priceResult.priceSource
+                amountResult.operationalFee
             );
         }
     }
@@ -895,20 +877,19 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Get token price from best available source
+     * @notice Get token price from oracle
      * @param tokenType Token type to get price for
      * @return price Token price in USD (18 decimals)
-     * @return source Price data source used
      */
     function _getTokenPrice(TokenType tokenType)
         public
         view
-        returns (uint price, PriceSource source)
+        returns (uint price)
     {
         // Special handling for ETH - use dedicated ETH/USD oracle only
         if (tokenType == TokenType.ETH) {
             try this.getOraclePrice(address(ethUsdPriceFeed), 18) returns (uint oraclePrice) {
-                return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                return oraclePrice;
             } catch {
                 // Oracle failed - no fallback for ETH
                 revert NoPriceDataAvailable(tokenType);
@@ -919,7 +900,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         if (tokenType == TokenType.USDC) {
             if (address(usdcUsdPriceFeed) != address(0)) {
                 try this.getOraclePrice(address(usdcUsdPriceFeed), 18) returns (uint oraclePrice) {
-                    return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                    return oraclePrice;
                 } catch {
                     // Oracle failed - no fallback for USDC
                     revert NoPriceDataAvailable(tokenType);
@@ -934,7 +915,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         if (tokenType == TokenType.USDT) {
             if (address(usdtUsdPriceFeed) != address(0)) {
                 try this.getOraclePrice(address(usdtUsdPriceFeed), 18) returns (uint oraclePrice) {
-                    return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                    return oraclePrice;
                 } catch {
                     // Oracle failed - no fallback for USDT
                     revert NoPriceDataAvailable(tokenType);
@@ -950,15 +931,14 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Get JPY/USD price from best available source
+     * @notice Get JPY/USD price from oracle or external data
      * @return price JPY/USD price (18 decimals)
-     * @return source Price data source used
      */
-    function _getJPYUSDPrice() public view returns (uint price, PriceSource source) {
+    function _getJPYUSDPrice() public view returns (uint price) {
         // Try Chainlink oracle first
         if (address(jpyUsdPriceFeed) != address(0)) {
             try this.getOraclePrice(address(jpyUsdPriceFeed), 18) returns (uint oraclePrice) {
-                return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
+                return oraclePrice;
             } catch {
                 // Oracle failed, fall back to external data
             }
@@ -973,7 +953,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         ) {
             // Convert answer to 18 decimals (assume 8 decimals input like Chainlink)
             uint priceIn18Decimals = uint(externalRoundData.answer) * (10 ** 10);
-            return (priceIn18Decimals, PriceSource.EXTERNAL_DATA);
+            return priceIn18Decimals;
         }
 
         // No valid price data available
@@ -1047,7 +1027,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @return jpyUsdRate JPY/USD price used
      * @return exchangeFee Exchange fee amount in tokens
      * @return operationalFee Operational fee amount in tokens
-     * @return priceSource Price data source used
      */
     function getExchangeQuote(TokenType tokenType, uint nlpAmount)
         external
@@ -1057,12 +1036,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             uint tokenUsdRate,
             uint jpyUsdRate,
             uint exchangeFee,
-            uint operationalFee,
-            PriceSource priceSource
+            uint operationalFee
         )
     {
         if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
-            return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
+            return (0, 0, 0, 0, 0);
         }
 
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
@@ -1074,12 +1052,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                 jpyUsdRate = priceResult.jpyUsdPrice;
                 exchangeFee = amountResult.exchangeFee;
                 operationalFee = amountResult.operationalFee;
-                priceSource = priceResult.priceSource;
             } catch {
-                return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
+                return (0, 0, 0, 0, 0);
             }
         } catch {
-            return (0, 0, 0, 0, 0, PriceSource.FALLBACK);
+            return (0, 0, 0, 0, 0);
         }
     }
 
@@ -1088,22 +1065,19 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @return ethBalance Current ETH balance
      * @return isPaused Whether contract is paused
      * @return jpyUsdPrice Current JPY/USD price
-     * @return jpyPriceSource JPY/USD price source
      */
     function getContractStatus()
         external
         view
-        returns (uint ethBalance, bool isPaused, uint jpyUsdPrice, PriceSource jpyPriceSource)
+        returns (uint ethBalance, bool isPaused, uint jpyUsdPrice)
     {
         ethBalance = address(this).balance;
         isPaused = paused();
 
-        try this._getJPYUSDPrice() returns (uint price, PriceSource source) {
+        try this._getJPYUSDPrice() returns (uint price) {
             jpyUsdPrice = price;
-            jpyPriceSource = source;
         } catch {
             jpyUsdPrice = 0;
-            jpyPriceSource = PriceSource.FALLBACK;
         }
     }
 
@@ -1164,12 +1138,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Get latest JPY/USD price from best available source
+     * @notice Get latest JPY/USD price from oracle or external data
      * @return price JPY/USD price (18 decimals)
-     * @return source Price data source used
      * @dev This function uses oracle if available, otherwise external round data
      */
-    function getLatestJPYPrice() external view returns (uint price, PriceSource source) {
+    function getLatestJPYPrice() external view returns (uint price) {
         return _getJPYUSDPrice();
     }
 

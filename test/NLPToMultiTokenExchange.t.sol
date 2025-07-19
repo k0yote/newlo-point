@@ -400,7 +400,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(exchange.getLatestETHPrice() > 0, "ETH oracle price should work");
 
         // JPY price from external round data or oracle
-        (uint jpyPrice,) = exchange.getLatestJPYPrice();
+        uint jpyPrice = exchange.getLatestJPYPrice();
         assertTrue(jpyPrice > 0, "JPY price should be available");
     }
 
@@ -632,7 +632,7 @@ contract NLPToMultiTokenExchangeTest is Test {
             uint tokenUsdRate,
             uint jpyUsdRate,
             uint exchangeFee,
-            uint operationalFee,
+            uint operationalFee
         ) = exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
 
         assertTrue(tokenAmount > 0);
@@ -686,7 +686,7 @@ contract NLPToMultiTokenExchangeTest is Test {
     }
 
     function testContractStatus() public view {
-        (uint ethBalance, bool isPaused, uint jpyUsdPrice,) = exchange.getContractStatus();
+        (uint ethBalance, bool isPaused, uint jpyUsdPrice) = exchange.getContractStatus();
 
         assertEq(ethBalance, 100 ether);
         assertFalse(isPaused);
@@ -700,11 +700,11 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(ethPrice > 0, "ETH price from oracle should be available");
 
         // JPY price should come from external round data
-        (uint jpyPrice,) = exchange.getLatestJPYPrice();
+        uint jpyPrice = exchange.getLatestJPYPrice();
         assertTrue(jpyPrice > 0, "JPY price should be available");
 
         // Get quotes to ensure oracle-based pricing works
-        (uint ethAmount,,,,,) =
+        (uint ethAmount,,,,) =
             exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, 1000e18);
         assertTrue(ethAmount > 0, "ETH exchange quote should work");
     }
