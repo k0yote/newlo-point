@@ -267,13 +267,19 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error InvalidUser(address user);
     error PermitFailed(address user, uint nlpAmount, uint deadline);
     error TokenNotEnabled(TokenType tokenType);
-    error InvalidTokenConfig(TokenType tokenType);
     error NoPriceDataAvailable(TokenType tokenType);
-    error InvalidPriceUpdate(uint price);
     error InvalidFeeRecipient(address recipient);
     error InsufficientOperationalFee(TokenType tokenType, uint required, uint available);
     error InvalidMaxFee(uint fee, uint absoluteMaxFee);
-    error OracleAvailableForToken(TokenType tokenType);
+    error ZeroAddress();
+    error InvalidRateValue(uint rate);
+    error OperationalFeeNotEnabled();
+    error TransferFailed();
+    error InvalidPriceAnswer(int answer);
+    error InvalidTimestamp(uint timestamp);
+    error TreasuryNotSet();
+    error InvalidTokenType(TokenType tokenType);
+    error InvalidTokenConfig();
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -296,9 +302,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         address _usdtUsdPriceFeed,
         address _initialAdmin
     ) {
-        require(_nlpToken != address(0), "NLP token address cannot be zero");
-        require(_ethUsdPriceFeed != address(0), "ETH/USD price feed cannot be zero");
-        require(_initialAdmin != address(0), "Initial admin cannot be zero");
+        if (_nlpToken == address(0)) revert ZeroAddress();
+        if (_ethUsdPriceFeed == address(0)) revert ZeroAddress();
+        if (_initialAdmin == address(0)) revert ZeroAddress();
 
         nlpToken = IERC20Extended(_nlpToken);
         ethUsdPriceFeed = AggregatorV3Interface(_ethUsdPriceFeed);
@@ -447,8 +453,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         onlyRole(FEE_MANAGER_ROLE)
     {
         OperationalFeeConfig memory config = operationalFeeConfigs[tokenType];
-        require(config.isEnabled, "Operational fee not enabled");
-        require(config.feeRecipient != address(0), "Invalid fee recipient");
+        if (!config.isEnabled) revert OperationalFeeNotEnabled();
+        if (config.feeRecipient == address(0)) revert InvalidFeeRecipient(config.feeRecipient);
 
         uint availableFee = collectedOperationalFees[tokenType];
         uint withdrawAmount = amount == 0 ? availableFee : amount;
@@ -463,11 +469,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         if (tokenType == TokenType.ETH) {
             (bool sent,) = config.feeRecipient.call{ value: withdrawAmount }("");
-            require(sent, "ETH transfer failed");
+            if (!sent) revert TransferFailed();
         } else {
             TokenConfig memory tokenConfig = tokenConfigs[tokenType];
             IERC20Extended token = IERC20Extended(tokenConfig.tokenAddress);
-            require(token.transfer(config.feeRecipient, withdrawAmount), "Token transfer failed");
+            if (!token.transfer(config.feeRecipient, withdrawAmount)) revert TransferFailed();
         }
     }
 
@@ -513,9 +519,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint updatedAt,
         uint80 answeredInRound
     ) external onlyRole(PRICE_UPDATER_ROLE) {
-        require(answer > 0, "Invalid price answer");
-        require(updatedAt > 0, "Invalid update timestamp");
-        require(startedAt > 0, "Invalid start timestamp");
+        if (answer <= 0) revert InvalidPriceAnswer(answer);
+        if (updatedAt == 0) revert InvalidTimestamp(updatedAt);
+        if (startedAt == 0) revert InvalidTimestamp(startedAt);
 
         jpyUsdExternalRoundData = RoundData({
             roundId: roundId,
@@ -591,7 +597,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @dev The actual rate is calculated as: newRate / NLP_TO_JPY_RATE_DENOMINATOR
      */
     function updateNLPToJPYRate(uint newRate) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(newRate > 0, "Rate must be positive");
+        if (newRate == 0) revert InvalidRateValue(newRate);
         uint oldRate = NLP_TO_JPY_RATE;
         NLP_TO_JPY_RATE = newRate;
         emit NLPToJPYRateUpdated(oldRate, newRate, msg.sender);
@@ -742,7 +748,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         } else {
             TokenConfig memory config = tokenConfigs[tokenType];
             IERC20Extended token = IERC20Extended(config.tokenAddress);
-            require(token.transfer(user, amountResult.tokenAmount), "Token transfer failed");
+            if (!token.transfer(user, amountResult.tokenAmount)) revert TransferFailed();
         }
 
         // Emit appropriate event
@@ -1192,7 +1198,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(treasury != address(0), "Treasury not set");
+        if (treasury == address(0)) revert TreasuryNotSet();
 
         uint balance = address(this).balance;
         uint withdrawAmount = amount == 0 ? balance : amount;
@@ -1216,11 +1222,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(treasury != address(0), "Treasury not set");
-        require(tokenType != TokenType.ETH, "Use emergencyWithdrawETH for ETH");
+        if (treasury == address(0)) revert TreasuryNotSet();
+        if (tokenType == TokenType.ETH) revert InvalidTokenType(tokenType);
 
         TokenConfig memory config = tokenConfigs[tokenType];
-        require(config.tokenAddress != address(0), "Invalid token config");
+        if (config.tokenAddress == address(0)) revert InvalidTokenConfig();
 
         IERC20Extended token = IERC20Extended(config.tokenAddress);
         uint balance = token.balanceOf(address(this));
@@ -1231,7 +1237,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
 
         emit EmergencyWithdraw(tokenType, treasury, withdrawAmount);
-        require(token.transfer(treasury, withdrawAmount), "Token transfer failed");
+        if (!token.transfer(treasury, withdrawAmount)) revert TransferFailed();
     }
 
     /**
@@ -1239,7 +1245,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @param newTreasury New treasury address
      */
     function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(newTreasury != address(0), "Treasury cannot be zero address");
+        if (newTreasury == address(0)) revert ZeroAddress();
         address oldTreasury = treasury;
         treasury = newTreasury;
         emit TreasuryUpdated(oldTreasury, newTreasury);

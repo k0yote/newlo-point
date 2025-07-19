@@ -604,7 +604,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         exchange.pause();
 
         vm.prank(emergencyManager);
-        vm.expectRevert("Treasury not set");
+        vm.expectRevert(abi.encodeWithSelector(NLPToMultiTokenExchange.TreasuryNotSet.selector));
         exchange.emergencyWithdrawETH(1 ether);
     }
 
@@ -840,7 +840,7 @@ contract NLPToMultiTokenExchangeTest is Test {
      */
     function testZeroRateValidationMultiToken() public {
         vm.prank(owner);
-        vm.expectRevert("Rate must be positive");
+        vm.expectRevert(abi.encodeWithSelector(NLPToMultiTokenExchange.InvalidRateValue.selector, 0));
         exchange.updateNLPToJPYRate(0);
     }
 
