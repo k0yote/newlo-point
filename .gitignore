@@ -38,3 +38,4 @@ Thumbs.db
 solc-build/
 memo.txt
 README.md.bak
+simulate_exchange.py
