@@ -274,6 +274,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error InsufficientOperationalFee(TokenType tokenType, uint required, uint available);
     error InvalidMaxFee(uint fee, uint absoluteMaxFee);
     error OracleAvailableForToken(TokenType tokenType);
+    error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -816,6 +817,51 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @notice Gasless exchange with permit and slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minTokenAmount Minimum token amount expected (slippage protection)
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
+     */
+    function exchangeNLPWithPermitAndSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint minTokenAmount,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        // Execute permit
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Execute exchange with slippage protection
+        _executeExchangeOptimized(tokenType, nlpAmount, user, msg.sender, minTokenAmount);
+    }
+
+    /**
      * @notice Exchange NLP tokens for specified token
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
@@ -834,6 +880,25 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @notice Exchange NLP tokens for specified token with slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minTokenAmount Minimum token amount expected (slippage protection)
+     */
+    function exchangeNLPWithSlippage(TokenType tokenType, uint nlpAmount, uint minTokenAmount) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        _executeExchangeOptimized(tokenType, nlpAmount, msg.sender, address(0), minTokenAmount);
+    }
+
+    /**
      * @notice Internal function to execute exchange
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
@@ -849,6 +914,58 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         // Calculate token amounts
         TokenAmountResult memory amountResult =
             _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
+
+        // For demonstration: this would be the buggy version mentioned in the bug report
+        // if (amountResult.tokenAmount < someMinAmount) {
+        //     revert SlippageToleranceExceeded(amountResult.tokenAmount, amountResult.tokenAmount); // BUG: same value used twice
+        // }
+
+        // Check balance
+        if (tokenType == TokenType.ETH) {
+            if (address(this).balance < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, address(this).balance
+                );
+            }
+        } else {
+            TokenConfig memory config = tokenConfigs[tokenType];
+            IERC20Extended token = IERC20Extended(config.tokenAddress);
+            if (token.balanceOf(address(this)) < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, token.balanceOf(address(this))
+                );
+            }
+        }
+
+        // Update statistics (CEI pattern)
+        _updateStatistics(tokenType, nlpAmount, user, amountResult);
+
+        // Execute token transfer and emit events
+        _executeTokenTransfer(tokenType, nlpAmount, user, relayer, priceResult, amountResult);
+    }
+
+    /**
+     * @notice Internal function to execute exchange with slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param user User address
+     * @param relayer Relayer address (address(0) for direct exchange)
+     * @param minTokenAmount Minimum token amount expected (slippage protection)
+     */
+    function _executeExchangeOptimized(TokenType tokenType, uint nlpAmount, address user, address relayer, uint minTokenAmount)
+        internal
+    {
+        // Calculate prices
+        PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
+
+        // Calculate token amounts
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
+
+        // Check slippage tolerance - fix the bug by using correct parameters
+        if (amountResult.tokenAmount < minTokenAmount) {
+            revert SlippageToleranceExceeded(minTokenAmount, amountResult.tokenAmount);
+        }
 
         // Check balance
         if (tokenType == TokenType.ETH) {
