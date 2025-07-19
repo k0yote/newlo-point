@@ -150,9 +150,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice Exchange rate numerator: NLP to JPY (90 for 0.9 JPY per NLP)
     uint public NLP_TO_JPY_RATE = 90;
 
-    /// @notice Price data staleness threshold (1 hour)
-    uint public constant PRICE_STALENESS_THRESHOLD = 3600;
-
     /// @notice Absolute maximum fee rate (100%)
     uint public constant ABSOLUTE_MAX_FEE = 10000;
 
@@ -947,11 +944,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         // Use external round data (latestRoundData format)
         RoundData memory externalRoundData = jpyUsdExternalRoundData;
-        if (
-            externalRoundData.updatedAt > 0
-                && block.timestamp - externalRoundData.updatedAt <= PRICE_STALENESS_THRESHOLD
-                && externalRoundData.answer > 0
-        ) {
+        if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
             // Convert answer to 18 decimals (assume 8 decimals input like Chainlink)
             uint priceIn18Decimals = uint(externalRoundData.answer) * (10 ** 10);
             return priceIn18Decimals;
@@ -992,12 +985,10 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         // Check for stale price data
         if (answeredInRound < roundId) {
-            revert PriceDataStale(updatedAt, PRICE_STALENESS_THRESHOLD);
+            revert PriceDataStale(updatedAt, 0);
         }
 
-        if (block.timestamp - updatedAt > PRICE_STALENESS_THRESHOLD) {
-            revert PriceDataStale(updatedAt, PRICE_STALENESS_THRESHOLD);
-        }
+        // Note: Removed staleness time check to allow flexible oracle update timing
 
         // Check if the round is complete
         if (startedAt == 0) {
