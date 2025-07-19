@@ -280,6 +280,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error TreasuryNotSet();
     error InvalidTokenType(TokenType tokenType);
     error InvalidTokenConfig();
+    error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount, uint minAmount);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -779,7 +780,49 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Exchange NLP tokens for specified token using permit for gasless operation
+     * @notice Exchange NLP tokens for specified token (legacy function without slippage protection)
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithSlippage for better protection.
+     */
+    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), 0);
+    }
+
+    /**
+     * @notice Exchange NLP tokens for specified token with slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
+     */
+    function exchangeNLPWithSlippage(TokenType tokenType, uint nlpAmount, uint minAmountOut)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), minAmountOut);
+    }
+
+    /**
+     * @notice Exchange NLP tokens using permit (legacy function without slippage protection)
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
      * @param deadline Permit deadline
@@ -787,6 +830,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @param r ECDSA signature parameter
      * @param s ECDSA signature parameter
      * @param user User address (token owner)
+     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithPermitAndSlippage for better protection.
      */
     function exchangeNLPWithPermit(
         TokenType tokenType,
@@ -818,17 +862,36 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
 
         // Execute exchange
-        _executeExchange(tokenType, nlpAmount, user, msg.sender);
+        _executeExchange(tokenType, nlpAmount, user, msg.sender, 0);
     }
 
     /**
-     * @notice Exchange NLP tokens for specified token
+     * @notice Exchange NLP tokens using permit with slippage protection
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
      */
-    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
+    function exchangeNLPWithPermitAndSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint minAmountOut,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
         if (nlpAmount == 0) {
             revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
         }
 
         TokenConfig memory config = tokenConfigs[tokenType];
@@ -836,25 +899,45 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             revert TokenNotEnabled(tokenType);
         }
 
-        _executeExchange(tokenType, nlpAmount, msg.sender, address(0));
+        // Execute permit
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Execute exchange
+        _executeExchange(tokenType, nlpAmount, user, msg.sender, minAmountOut);
     }
 
     /**
-     * @notice Internal function to execute exchange
+     * @notice Internal function to execute exchange with slippage protection
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
      * @param user User address
      * @param relayer Relayer address (address(0) for direct exchange)
+     * @param minAmountOut Minimum amount of tokens to receive
      */
-    function _executeExchange(TokenType tokenType, uint nlpAmount, address user, address relayer)
-        internal
-    {
+    function _executeExchange(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        uint minAmountOut
+    ) internal {
         // Calculate prices
         PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
 
         // Calculate token amounts
         TokenAmountResult memory amountResult =
             _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
+
+        // Slippage protection check (skip if minAmountOut is 0 for legacy compatibility)
+        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
+            revert SlippageToleranceExceeded(
+                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
+            );
+        }
 
         // Check balance
         if (tokenType == TokenType.ETH) {
@@ -1168,6 +1251,98 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      */
     function calculateJPYAmount(uint nlpAmount) external view returns (uint jpyAmount) {
         return Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
+    }
+
+    /**
+     * @notice Calculate minimum amount out with slippage tolerance
+     * @param tokenType Token type to get quote for
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
+     * @return minAmountOut Minimum amount out considering slippage
+     * @return quoteAmount Expected amount without slippage
+     * @dev Use this function to calculate minAmountOut for slippage-protected exchanges
+     */
+    function calculateMinAmountOut(TokenType tokenType, uint nlpAmount, uint slippageToleranceBps)
+        external
+        view
+        returns (uint minAmountOut, uint quoteAmount)
+    {
+        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
+
+        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
+            return (0, 0);
+        }
+
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
+                quoteAmount = amountResult.tokenAmount;
+                // Calculate minimum amount considering slippage
+                minAmountOut = (quoteAmount * (10000 - slippageToleranceBps)) / 10000;
+            } catch {
+                return (0, 0);
+            }
+        } catch {
+            return (0, 0);
+        }
+    }
+
+    /**
+     * @notice Get exchange quote with slippage calculation
+     * @param tokenType Token type to get quote for
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
+     * @return tokenAmount Amount of tokens that would be received
+     * @return tokenUsdRate Token/USD price used
+     * @return jpyUsdRate JPY/USD price used
+     * @return exchangeFee Exchange fee amount in tokens
+     * @return operationalFee Operational fee amount in tokens
+     * @return minAmountOut Minimum amount out considering slippage
+     * @return maxSlippageAmount Maximum possible slippage amount
+     */
+    function getExchangeQuoteWithSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint slippageToleranceBps
+    )
+        external
+        view
+        returns (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee,
+            uint minAmountOut,
+            uint maxSlippageAmount
+        )
+    {
+        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
+
+        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
+
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
+                tokenAmount = amountResult.tokenAmount;
+                tokenUsdRate = priceResult.tokenUsdPrice;
+                jpyUsdRate = priceResult.jpyUsdPrice;
+                exchangeFee = amountResult.exchangeFee;
+                operationalFee = amountResult.operationalFee;
+
+                // Calculate slippage protection values
+                minAmountOut = (tokenAmount * (10000 - slippageToleranceBps)) / 10000;
+                maxSlippageAmount = tokenAmount - minAmountOut;
+            } catch {
+                return (0, 0, 0, 0, 0, 0, 0);
+            }
+        } catch {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════

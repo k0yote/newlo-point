@@ -840,7 +840,9 @@ contract NLPToMultiTokenExchangeTest is Test {
      */
     function testZeroRateValidationMultiToken() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(NLPToMultiTokenExchange.InvalidRateValue.selector, 0));
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenExchange.InvalidRateValue.selector, 0)
+        );
         exchange.updateNLPToJPYRate(0);
     }
 
@@ -910,6 +912,362 @@ contract NLPToMultiTokenExchangeTest is Test {
             exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
         assertEq(stats.totalExchanged, nlpAmount, "Total exchanged not updated");
     }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                           SLIPPAGE PROTECTION TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Test slippage protection quote calculation
+     */
+    function testSlippageQuoteCalculation() public view {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 100; // 1%
+
+        (uint minAmountOut, uint quoteAmount) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        assertGt(quoteAmount, 0, "Quote amount should be greater than 0");
+        assertLt(minAmountOut, quoteAmount, "Minimum amount should be less than quote");
+
+        // Check that minAmountOut is 99% of quoteAmount (1% slippage)
+        uint expectedMinAmount = (quoteAmount * 9900) / 10000;
+        assertEq(minAmountOut, expectedMinAmount, "Minimum amount calculation incorrect");
+    }
+
+    /**
+     * @notice Test comprehensive slippage quote with all return values
+     */
+    function testComprehensiveSlippageQuote() public view {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 250; // 2.5%
+
+        (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee,
+            uint minAmountOut,
+            uint maxSlippageAmount
+        ) = exchange.getExchangeQuoteWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        assertGt(tokenAmount, 0, "Token amount should be greater than 0");
+        assertGt(tokenUsdRate, 0, "Token USD rate should be greater than 0");
+        assertGt(jpyUsdRate, 0, "JPY USD rate should be greater than 0");
+        assertGt(exchangeFee, 0, "Exchange fee should be greater than 0");
+        assertGt(operationalFee, 0, "Operational fee should be greater than 0");
+        assertLt(minAmountOut, tokenAmount, "Minimum amount should be less than token amount");
+
+        // Check slippage calculations
+        uint expectedMinAmount = (tokenAmount * 9750) / 10000; // 97.5% of tokenAmount
+        assertEq(minAmountOut, expectedMinAmount, "Minimum amount calculation incorrect");
+        assertEq(
+            maxSlippageAmount, tokenAmount - minAmountOut, "Max slippage calculation incorrect"
+        );
+    }
+
+    /**
+     * @notice Test successful exchange with slippage protection
+     */
+    function testSuccessfulExchangeWithSlippage() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 100; // 1%
+
+        // Get quote first
+        (uint minAmountOut, uint quoteAmount) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        uint initialUserBalance = user.balance;
+        uint initialNLPBalance = nlpToken.balanceOf(user);
+
+        // Execute exchange with slippage protection
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+        exchange.exchangeNLPWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, minAmountOut
+        );
+        vm.stopPrank();
+
+        // Verify exchange was successful
+        assertEq(nlpToken.balanceOf(user), initialNLPBalance - nlpAmount, "NLP tokens not burned");
+        assertGe(
+            user.balance, initialUserBalance + minAmountOut, "User didn't receive minimum amount"
+        );
+        assertLe(user.balance, initialUserBalance + quoteAmount, "User received more than expected");
+    }
+
+    /**
+     * @notice Test exchange failure due to slippage protection
+     */
+    function testExchangeFailureSlippageProtection() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Get current quote
+        (uint tokenAmount,,,,) =
+            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+
+        // Set unrealistic minAmountOut (higher than possible)
+        uint unrealisticMinAmount = tokenAmount * 2;
+
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        // Expect SlippageToleranceExceeded error
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NLPToMultiTokenExchange.SlippageToleranceExceeded.selector,
+                tokenAmount,
+                tokenAmount,
+                unrealisticMinAmount
+            )
+        );
+
+        exchange.exchangeNLPWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, unrealisticMinAmount
+        );
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Test permit-based exchange with slippage protection
+     */
+    function testPermitExchangeWithSlippage() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 100; // 1%
+
+        // Get quote
+        (uint minAmountOut,) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.USDC, nlpAmount, slippageTolerance
+        );
+
+        uint initialUserUSDCBalance = usdcToken.balanceOf(user);
+        uint initialNLPBalance = nlpToken.balanceOf(user);
+
+        // Execute permit-based exchange with slippage protection
+        vm.prank(user);
+        exchange.exchangeNLPWithPermitAndSlippage(
+            NLPToMultiTokenExchange.TokenType.USDC,
+            nlpAmount,
+            minAmountOut,
+            block.timestamp + 1 hours,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+
+        // Verify exchange was successful
+        assertEq(nlpToken.balanceOf(user), initialNLPBalance - nlpAmount, "NLP tokens not burned");
+        assertGe(
+            usdcToken.balanceOf(user),
+            initialUserUSDCBalance + minAmountOut,
+            "User didn't receive minimum USDC amount"
+        );
+    }
+
+    /**
+     * @notice Test legacy functions still work (backward compatibility)
+     */
+    function testLegacyFunctionsBackwardCompatibility() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        uint initialUserBalance = user.balance;
+        uint initialNLPBalance = nlpToken.balanceOf(user);
+
+        // Test legacy exchange function (without slippage protection)
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        vm.stopPrank();
+
+        // Verify exchange was successful
+        assertEq(nlpToken.balanceOf(user), initialNLPBalance - nlpAmount, "NLP tokens not burned");
+        assertGt(user.balance, initialUserBalance, "User should receive ETH");
+    }
+
+    /**
+     * @notice Test price change simulation with slippage protection
+     */
+    function testPriceChangeWithSlippageProtection() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 200; // 2%
+
+        // Get initial quote
+        (uint initialMinAmountOut,) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        // Simulate price drop by updating ETH price feed
+        vm.prank(owner);
+        ethUsdPriceFeed.updateAnswer(2000e8); // Drop from 3483 to 2000 USD
+
+        uint userBalanceBefore = user.balance;
+
+        // Exchange should still succeed with slippage protection
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+        exchange.exchangeNLPWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, initialMinAmountOut
+        );
+        vm.stopPrank();
+
+        // User should receive more ETH due to lower ETH price, but at least the minimum
+        assertGe(
+            user.balance, userBalanceBefore + initialMinAmountOut, "Slippage protection failed"
+        );
+    }
+
+    /**
+     * @notice Test extreme slippage tolerance validation
+     */
+    function testExtremeSlippageToleranceValidation() public view {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Test with 0% slippage (should work)
+        (uint minAmountOut1, uint quoteAmount1) =
+            exchange.calculateMinAmountOut(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, 0);
+        assertEq(minAmountOut1, quoteAmount1, "0% slippage should give same amounts");
+
+        // Test with 100% slippage (should give 0 min amount)
+        (uint minAmountOut2,) =
+            exchange.calculateMinAmountOut(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, 10000);
+        assertEq(minAmountOut2, 0, "100% slippage should give 0 min amount");
+    }
+
+    /**
+     * @notice Test slippage calculation with different tokens
+     */
+    function testSlippageCalculationDifferentTokens() public view {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 150; // 1.5%
+
+        // Test ETH (18 decimals)
+        (uint ethMinAmount, uint ethQuote) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        // Test USDC (6 decimals)
+        (uint usdcMinAmount, uint usdcQuote) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.USDC, nlpAmount, slippageTolerance
+        );
+
+        // Test USDT (6 decimals)
+        (uint usdtMinAmount, uint usdtQuote) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.USDT, nlpAmount, slippageTolerance
+        );
+
+        // All should have valid calculations
+        assertGt(ethQuote, 0, "ETH quote should be positive");
+        assertGt(usdcQuote, 0, "USDC quote should be positive");
+        assertGt(usdtQuote, 0, "USDT quote should be positive");
+
+        // All min amounts should be 98.5% of quotes
+        assertEq(ethMinAmount, (ethQuote * 9850) / 10000, "ETH slippage calculation incorrect");
+        assertEq(usdcMinAmount, (usdcQuote * 9850) / 10000, "USDC slippage calculation incorrect");
+        assertEq(usdtMinAmount, (usdtQuote * 9850) / 10000, "USDT slippage calculation incorrect");
+    }
+
+    /**
+     * @notice Test invalid slippage tolerance validation
+     */
+    function testInvalidSlippageToleranceValidation() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Test with slippage tolerance > 100% (should revert)
+        vm.expectRevert("Slippage tolerance too high");
+        exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH,
+            nlpAmount,
+            10001 // 100.01%
+        );
+
+        // Test comprehensive quote with invalid slippage
+        vm.expectRevert("Slippage tolerance too high");
+        exchange.getExchangeQuoteWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH,
+            nlpAmount,
+            15000 // 150%
+        );
+    }
+
+    /**
+     * @notice Test slippage protection with disabled token
+     */
+    function testSlippageProtectionWithDisabledToken() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Disable ETH token
+        vm.prank(configManager);
+        exchange.setTokenEnabled(NLPToMultiTokenExchange.TokenType.ETH, false);
+
+        // Should return zeros for disabled token
+        (uint minAmountOut, uint quoteAmount) =
+            exchange.calculateMinAmountOut(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, 100);
+
+        assertEq(minAmountOut, 0, "Disabled token should return 0 min amount");
+        assertEq(quoteAmount, 0, "Disabled token should return 0 quote");
+
+        // Comprehensive quote should also return zeros
+        (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee,
+            uint minAmountOut2,
+            uint maxSlippageAmount
+        ) = exchange.getExchangeQuoteWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, 100
+        );
+
+        assertEq(tokenAmount, 0, "Disabled token should return 0 token amount");
+        assertEq(tokenUsdRate, 0, "Disabled token should return 0 USD rate");
+        assertEq(jpyUsdRate, 0, "Disabled token should return 0 JPY rate");
+        assertEq(exchangeFee, 0, "Disabled token should return 0 exchange fee");
+        assertEq(operationalFee, 0, "Disabled token should return 0 operational fee");
+        assertEq(minAmountOut2, 0, "Disabled token should return 0 min amount");
+        assertEq(maxSlippageAmount, 0, "Disabled token should return 0 max slippage");
+    }
+
+    /**
+     * @notice Test slippage protection integration with gas optimization
+     */
+    function testSlippageProtectionGasOptimization() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint slippageTolerance = 100; // 1%
+
+        // Measure gas for slippage-protected exchange
+        uint gasStart = gasleft();
+
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        (uint minAmountOut,) = exchange.calculateMinAmountOut(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, slippageTolerance
+        );
+
+        exchange.exchangeNLPWithSlippage(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, minAmountOut
+        );
+        vm.stopPrank();
+
+        uint gasUsed = gasStart - gasleft();
+
+        // Gas usage should be reasonable (less than 400k gas for complex operations)
+        assertLt(gasUsed, 400000, "Gas usage should be reasonable for slippage protected exchange");
+
+        // Should be more than basic transfer (shows the function is doing work)
+        assertGt(gasUsed, 100000, "Should use meaningful amount of gas for complex operations");
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                              RATE CONFIGURATION TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
 
     receive() external payable { }
 }
