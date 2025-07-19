@@ -248,8 +248,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         TokenType indexed tokenType, uint feeRate, address feeRecipient, bool isEnabled
     );
 
-
-
     /// @notice Emitted when JPY/USD external price is updated
     event JPYUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
 
@@ -518,8 +516,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                            EXTERNAL PRICE UPDATES
     ═══════════════════════════════════════════════════════════════════════ */
 
-
-
     /**
      * @notice Update JPY/USD external data in latestRoundData format (recommended for Soneium)
      * @param roundId Round ID
@@ -607,14 +603,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         emit USDTUSDOracleUpdated(oldOracle, newUsdtUsdPriceFeed);
     }
-
-
-
-
-
-
-
-
 
     /* ═══════════════════════════════════════════════════════════════════════
                             EXCHANGE FUNCTIONS

@@ -389,16 +389,16 @@ contract NLPToMultiTokenExchangeTest is Test {
                               PRICE MANAGEMENT TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    function testETHPriceFromOracle() public {
+    function testETHPriceFromOracle() public view {
         // ETH price is now fetched from oracle only
         uint ethPrice = exchange.getLatestETHPrice();
         assertTrue(ethPrice > 0, "ETH price should be greater than 0");
     }
 
-    function testOraclePricesAreWorking() public {
+    function testOraclePricesAreWorking() public view {
         // Test that oracle prices are accessible for all tokens
         assertTrue(exchange.getLatestETHPrice() > 0, "ETH oracle price should work");
-        
+
         // JPY price from external round data or oracle
         (uint jpyPrice,) = exchange.getLatestJPYPrice();
         assertTrue(jpyPrice > 0, "JPY price should be available");
@@ -406,7 +406,7 @@ contract NLPToMultiTokenExchangeTest is Test {
 
     function testJPYUSDExternalPriceUpdate() public {
         uint newPrice = 0.0068e18; // New JPY/USD price
-        int answer = int(newPrice / 10**10); // Convert to 8 decimals
+        int answer = int(newPrice / 10 ** 10); // Convert to 8 decimals
 
         vm.prank(priceUpdater);
         exchange.updateJPYUSDRoundData(
@@ -417,9 +417,9 @@ contract NLPToMultiTokenExchangeTest is Test {
             1 // answeredInRound
         );
 
-        (,int retrievedAnswer,,,) = exchange.jpyUsdExternalRoundData();
+        (, int retrievedAnswer,,,) = exchange.jpyUsdExternalRoundData();
         assertEq(retrievedAnswer, answer);
-        assertEq(uint(retrievedAnswer) * 10**10, newPrice); // Check conversion back to 18 decimals
+        assertEq(uint(retrievedAnswer) * 10 ** 10, newPrice); // Check conversion back to 18 decimals
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -693,18 +693,19 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(jpyUsdPrice > 0);
     }
 
-    function testOnlyOracleBasedPricing() public {
+    function testOnlyOracleBasedPricing() public view {
         // Test that all token prices come from oracles
         // ETH price should come from dedicated oracle
         uint ethPrice = exchange.getLatestETHPrice();
         assertTrue(ethPrice > 0, "ETH price from oracle should be available");
-        
+
         // JPY price should come from external round data
         (uint jpyPrice,) = exchange.getLatestJPYPrice();
         assertTrue(jpyPrice > 0, "JPY price should be available");
-        
+
         // Get quotes to ensure oracle-based pricing works
-        (uint ethAmount,,,,,) = exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, 1000e18);
+        (uint ethAmount,,,,,) =
+            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, 1000e18);
         assertTrue(ethAmount > 0, "ETH exchange quote should work");
     }
 

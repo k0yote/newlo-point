@@ -145,7 +145,7 @@ contract DeployMultiTokenExchange is Script {
         // Convert 18 decimals to 8 decimals for Chainlink format
         exchange.updateJPYUSDRoundData(
             1, // roundId
-            int(jpyUsdPrice / 10**10), // answer: convert to 8 decimals
+            int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
             block.timestamp, // startedAt
             block.timestamp, // updatedAt
             1 // answeredInRound
@@ -287,7 +287,7 @@ contract DeployMultiTokenExchangeLocal is Script {
         // Convert 18 decimals to 8 decimals for Chainlink format
         exchange.updateJPYUSDRoundData(
             1, // roundId
-            int(jpyUsdPrice / 10**10), // answer: convert to 8 decimals
+            int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
             block.timestamp, // startedAt
             block.timestamp, // updatedAt
             1 // answeredInRound
