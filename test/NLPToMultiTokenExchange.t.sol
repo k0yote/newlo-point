@@ -714,16 +714,11 @@ contract NLPToMultiTokenExchangeTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function testZeroExchangeAmount() public {
-        uint nlpAmount = 0;
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                NLPToMultiTokenExchange.InvalidExchangeAmount.selector, nlpAmount
-            )
-        );
-
         vm.prank(user);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenExchange.InvalidExchangeAmount.selector, 0)
+        );
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 0);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -796,6 +791,124 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertEq(address(exchange.usdtUsdPriceFeed()), address(0));
 
         vm.stopPrank();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                           NLP TO JPY RATE TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Test NLP to JPY rate update functionality
+     */
+    function testUpdateNLPToJPYRate() public {
+        uint newRate = 150; // 1.5 JPY per NLP
+
+        // Only admin can update rate
+        vm.prank(owner);
+        exchange.updateNLPToJPYRate(newRate);
+
+        assertEq(exchange.getNLPToJPYRate(), newRate, "Rate should be updated");
+
+        // Test calculation with new rate
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint jpyAmount = exchange.calculateJPYAmount(nlpAmount);
+        uint expectedJpyAmount = (nlpAmount * newRate) / exchange.getNLPToJPYRateDenominator();
+
+        assertEq(jpyAmount, expectedJpyAmount, "JPY calculation should reflect new rate");
+    }
+
+    /**
+     * @notice Test that only admin can update NLP to JPY rate
+     */
+    function testOnlyAdminCanUpdateNLPToJPYRate() public {
+        uint newRate = 150;
+
+        // Non-admin should fail
+        vm.prank(user);
+        vm.expectRevert();
+        exchange.updateNLPToJPYRate(newRate);
+
+        // Admin should succeed
+        vm.prank(owner);
+        exchange.updateNLPToJPYRate(newRate);
+
+        assertEq(exchange.getNLPToJPYRate(), newRate, "Rate should be updated by admin");
+    }
+
+    /**
+     * @notice Test rate validation (zero rate should fail)
+     */
+    function testZeroRateValidationMultiToken() public {
+        vm.prank(owner);
+        vm.expectRevert("Rate must be positive");
+        exchange.updateNLPToJPYRate(0);
+    }
+
+    /**
+     * @notice Test rate denominator is correctly configured
+     */
+    function testRateDenominatorMultiToken() public view {
+        uint denominator = exchange.getNLPToJPYRateDenominator();
+        assertEq(denominator, 100, "Rate denominator should be 100");
+    }
+
+    /**
+     * @notice Test exchange calculation with different rates for multi-token
+     */
+    function testExchangeWithDifferentRatesMultiToken() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Test with rate = 50 (0.5 JPY per NLP)
+        vm.prank(owner);
+        exchange.updateNLPToJPYRate(50);
+
+        (uint tokenAmount1,,,,) =
+            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+
+        // Test with rate = 200 (2.0 JPY per NLP)
+        vm.prank(owner);
+        exchange.updateNLPToJPYRate(200);
+
+        (uint tokenAmount2,,,,) =
+            exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+
+        // Higher rate should give more tokens (200/50 = 4x more)
+        assertApproxEqRel(
+            tokenAmount2,
+            tokenAmount1 * 4,
+            0.001e18,
+            "Higher rate should give proportionally more tokens"
+        );
+    }
+
+    /**
+     * @notice Test actual exchange with custom rate
+     */
+    function testActualExchangeWithCustomRate() public {
+        // Set rate to 1.5 JPY per NLP (150/100)
+        vm.prank(owner);
+        exchange.updateNLPToJPYRate(150);
+
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint initialUserBalance = user.balance;
+        uint initialNLPBalance = nlpToken.balanceOf(user);
+
+        // Execute exchange
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        vm.stopPrank();
+
+        // Verify NLP tokens were burned
+        assertEq(nlpToken.balanceOf(user), initialNLPBalance - nlpAmount, "NLP tokens not burned");
+
+        // Verify user received ETH (should be 1.5x more than with default 0.9 rate)
+        assertGt(user.balance, initialUserBalance, "User should receive ETH");
+
+        // Verify statistics updated
+        NLPToMultiTokenExchange.TokenStats memory stats =
+            exchange.getTokenStats(NLPToMultiTokenExchange.TokenType.ETH);
+        assertEq(stats.totalExchanged, nlpAmount, "Total exchanged not updated");
     }
 
     receive() external payable { }

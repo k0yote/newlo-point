@@ -17,7 +17,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  * @dev This contract allows users to exchange NLP tokens for multiple tokens using flexible price feeds
  *
  * @dev Key Features:
- *      - 1:1 NLP to JPY exchange rate
+ *      - Configurable NLP to JPY exchange rate
  *      - Multi-token support (ETH, USDC, USDT)
  *      - Oracle-based price management with JPY/USD external data support
  *      - Role-based access control for different administrative functions
@@ -29,10 +29,10 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *      - Gasless exchange using permit
  *
  * @dev Exchange Formula:
- *      1. NLP → JPY (1:1 ratio)
+ *      1. NLP → JPY (configurable rate using numerator/denominator)
  *      2. JPY → USD using JPY/USD price feed (oracle or external)
  *      3. USD → Target Token using token/USD price feed
- *      Formula: tokenAmount = (nlpAmount * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
+ *      Formula: tokenAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
  *
  * @dev Price Data Sources:
  *      - Chainlink Oracle for ETH/USDC/USDT (when available)
@@ -65,8 +65,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         USDT
     }
 
-
-
     /* ═══════════════════════════════════════════════════════════════════════
                                   STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -89,14 +87,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         bool isEnabled; // Whether exchanges are enabled for this token
         bool hasOracle; // Whether Chainlink oracle is available
         string symbol; // Token symbol for events
-    }
-
-    /// @notice External price data
-    struct ExternalPriceData {
-        uint price; // Price in USD (18 decimals)
-        uint updatedAt; // Last update timestamp
-        address updatedBy; // Address that updated the price
-        bool isValid; // Whether price data is valid
     }
 
     /// @notice Exchange statistics per token
@@ -157,8 +147,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                                 CONSTANTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Exchange rate: 1 NLP = 1 JPY
-    uint public constant NLP_TO_JPY_RATE = 1;
+    /// @notice Exchange rate numerator: NLP to JPY (90 for 0.9 JPY per NLP)
+    uint public NLP_TO_JPY_RATE = 90;
 
     /// @notice Price data staleness threshold (1 hour)
     uint public constant PRICE_STALENESS_THRESHOLD = 3600;
@@ -168,6 +158,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Maximum fee rate (5% initially, configurable)
     uint public maxFee = 500;
+
+    /// @notice Rate denominator for NLP to JPY conversion (e.g., 100 for 0.9 JPY per NLP)
+    uint public constant NLP_TO_JPY_RATE_DENOMINATOR = 100;
 
     /// @notice Access control roles
     bytes32 public constant CONFIG_MANAGER_ROLE = keccak256("CONFIG_MANAGER_ROLE");
@@ -181,9 +174,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Token configurations
     mapping(TokenType => TokenConfig) public tokenConfigs;
-
-    /// @notice External price data for tokens
-    mapping(TokenType => ExternalPriceData) public externalPrices;
 
     /// @notice Exchange statistics per token
     mapping(TokenType => TokenStats) public tokenStats;
@@ -262,6 +252,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Emitted when USDT/USD oracle address is updated
     event USDTUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
+
+    /// @notice Emitted when NLP to JPY exchange rate is updated
+    event NLPToJPYRateUpdated(uint oldRate, uint newRate, address updatedBy);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
@@ -595,6 +588,18 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         emit USDTUSDOracleUpdated(oldOracle, newUsdtUsdPriceFeed);
     }
 
+    /**
+     * @notice Update the NLP to JPY exchange rate numerator
+     * @param newRate New exchange rate numerator (e.g., 90 for 0.9 JPY per NLP when denominator is 100)
+     * @dev The actual rate is calculated as: newRate / NLP_TO_JPY_RATE_DENOMINATOR
+     */
+    function updateNLPToJPYRate(uint newRate) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newRate > 0, "Rate must be positive");
+        uint oldRate = NLP_TO_JPY_RATE;
+        NLP_TO_JPY_RATE = newRate;
+        emit NLPToJPYRateUpdated(oldRate, newRate, msg.sender);
+    }
+
     /* ═══════════════════════════════════════════════════════════════════════
                             EXCHANGE FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -613,10 +618,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint tokenUsdPrice = _getTokenPrice(tokenType);
         uint jpyUsdPrice = _getJPYUSDPrice();
 
-        result = PriceCalculationResult({
-            tokenUsdPrice: tokenUsdPrice,
-            jpyUsdPrice: jpyUsdPrice
-        });
+        result = PriceCalculationResult({ tokenUsdPrice: tokenUsdPrice, jpyUsdPrice: jpyUsdPrice });
     }
 
     /**
@@ -635,9 +637,12 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         OperationalFeeConfig memory opFeeConfig = operationalFeeConfigs[tokenType];
 
         // Enhanced calculation with improved precision
-        // NLP amount (18 decimals) * JPY/USD price (18 decimals) = 36 decimals
+        // First apply NLP to JPY conversion rate with decimal support
+        // Formula: jpyAmount = (nlpAmount * NLP_TO_JPY_RATE) / NLP_TO_JPY_RATE_DENOMINATOR
+        uint jpyAmount = Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
+        // JPY amount (18 decimals) * JPY/USD price (18 decimals) = 36 decimals
         // We need to normalize to 18 decimals (USD terms)
-        uint grossAmountInUSD = Math.mulDiv(nlpAmount, priceResult.jpyUsdPrice, 1e18);
+        uint grossAmountInUSD = Math.mulDiv(jpyAmount, priceResult.jpyUsdPrice, 1e18);
 
         // Calculate fees in USD terms first to avoid precision loss
         uint exchangeFeeInUSD = (grossAmountInUSD * config.exchangeFee) / 10000;
@@ -881,11 +886,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @param tokenType Token type to get price for
      * @return price Token price in USD (18 decimals)
      */
-    function _getTokenPrice(TokenType tokenType)
-        public
-        view
-        returns (uint price)
-    {
+    function _getTokenPrice(TokenType tokenType) public view returns (uint price) {
         // Special handling for ETH - use dedicated ETH/USD oracle only
         if (tokenType == TokenType.ETH) {
             try this.getOraclePrice(address(ethUsdPriceFeed), 18) returns (uint oraclePrice) {
@@ -1144,6 +1145,32 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      */
     function getLatestJPYPrice() external view returns (uint price) {
         return _getJPYUSDPrice();
+    }
+
+    /**
+     * @notice Get the current NLP to JPY exchange rate numerator
+     * @return rate The current exchange rate numerator
+     */
+    function getNLPToJPYRate() external view returns (uint rate) {
+        return NLP_TO_JPY_RATE;
+    }
+
+    /**
+     * @notice Get the rate denominator for NLP to JPY conversion
+     * @return denominator The rate denominator
+     */
+    function getNLPToJPYRateDenominator() external pure returns (uint denominator) {
+        return NLP_TO_JPY_RATE_DENOMINATOR;
+    }
+
+    /**
+     * @notice Calculate the actual NLP to JPY exchange rate as a decimal
+     * @param nlpAmount Amount of NLP tokens
+     * @return jpyAmount Equivalent JPY amount
+     * @dev For display purposes: actualRate = NLP_TO_JPY_RATE / NLP_TO_JPY_RATE_DENOMINATOR
+     */
+    function calculateJPYAmount(uint nlpAmount) external view returns (uint jpyAmount) {
+        return Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
