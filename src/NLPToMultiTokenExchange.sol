@@ -267,13 +267,20 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error InvalidUser(address user);
     error PermitFailed(address user, uint nlpAmount, uint deadline);
     error TokenNotEnabled(TokenType tokenType);
-    error InvalidTokenConfig(TokenType tokenType);
     error NoPriceDataAvailable(TokenType tokenType);
-    error InvalidPriceUpdate(uint price);
     error InvalidFeeRecipient(address recipient);
     error InsufficientOperationalFee(TokenType tokenType, uint required, uint available);
     error InvalidMaxFee(uint fee, uint absoluteMaxFee);
-    error OracleAvailableForToken(TokenType tokenType);
+    error ZeroAddress();
+    error InvalidRateValue(uint rate);
+    error OperationalFeeNotEnabled();
+    error TransferFailed();
+    error InvalidPriceAnswer(int answer);
+    error InvalidTimestamp(uint timestamp);
+    error TreasuryNotSet();
+    error InvalidTokenType(TokenType tokenType);
+    error InvalidTokenConfig();
+    error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount, uint minAmount);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -296,9 +303,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         address _usdtUsdPriceFeed,
         address _initialAdmin
     ) {
-        require(_nlpToken != address(0), "NLP token address cannot be zero");
-        require(_ethUsdPriceFeed != address(0), "ETH/USD price feed cannot be zero");
-        require(_initialAdmin != address(0), "Initial admin cannot be zero");
+        if (_nlpToken == address(0)) revert ZeroAddress();
+        if (_ethUsdPriceFeed == address(0)) revert ZeroAddress();
+        if (_initialAdmin == address(0)) revert ZeroAddress();
 
         nlpToken = IERC20Extended(_nlpToken);
         ethUsdPriceFeed = AggregatorV3Interface(_ethUsdPriceFeed);
@@ -447,8 +454,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         onlyRole(FEE_MANAGER_ROLE)
     {
         OperationalFeeConfig memory config = operationalFeeConfigs[tokenType];
-        require(config.isEnabled, "Operational fee not enabled");
-        require(config.feeRecipient != address(0), "Invalid fee recipient");
+        if (!config.isEnabled) revert OperationalFeeNotEnabled();
+        if (config.feeRecipient == address(0)) revert InvalidFeeRecipient(config.feeRecipient);
 
         uint availableFee = collectedOperationalFees[tokenType];
         uint withdrawAmount = amount == 0 ? availableFee : amount;
@@ -463,11 +470,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         if (tokenType == TokenType.ETH) {
             (bool sent,) = config.feeRecipient.call{ value: withdrawAmount }("");
-            require(sent, "ETH transfer failed");
+            if (!sent) revert TransferFailed();
         } else {
             TokenConfig memory tokenConfig = tokenConfigs[tokenType];
             IERC20Extended token = IERC20Extended(tokenConfig.tokenAddress);
-            require(token.transfer(config.feeRecipient, withdrawAmount), "Token transfer failed");
+            if (!token.transfer(config.feeRecipient, withdrawAmount)) revert TransferFailed();
         }
     }
 
@@ -513,9 +520,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint updatedAt,
         uint80 answeredInRound
     ) external onlyRole(PRICE_UPDATER_ROLE) {
-        require(answer > 0, "Invalid price answer");
-        require(updatedAt > 0, "Invalid update timestamp");
-        require(startedAt > 0, "Invalid start timestamp");
+        if (answer <= 0) revert InvalidPriceAnswer(answer);
+        if (updatedAt == 0) revert InvalidTimestamp(updatedAt);
+        if (startedAt == 0) revert InvalidTimestamp(startedAt);
 
         jpyUsdExternalRoundData = RoundData({
             roundId: roundId,
@@ -591,7 +598,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @dev The actual rate is calculated as: newRate / NLP_TO_JPY_RATE_DENOMINATOR
      */
     function updateNLPToJPYRate(uint newRate) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(newRate > 0, "Rate must be positive");
+        if (newRate == 0) revert InvalidRateValue(newRate);
         uint oldRate = NLP_TO_JPY_RATE;
         NLP_TO_JPY_RATE = newRate;
         emit NLPToJPYRateUpdated(oldRate, newRate, msg.sender);
@@ -611,15 +618,390 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         view
         returns (PriceCalculationResult memory result)
     {
-        // Get prices
-        uint tokenUsdPrice = _getTokenPrice(tokenType);
-        uint jpyUsdPrice = _getJPYUSDPrice();
+        // Get prices using optimized functions
+        uint tokenUsdPrice = _getTokenPriceOptimized(tokenType);
+        uint jpyUsdPrice = _getJPYUSDPriceOptimized();
 
         result = PriceCalculationResult({ tokenUsdPrice: tokenUsdPrice, jpyUsdPrice: jpyUsdPrice });
     }
 
     /**
-     * @notice Calculate token amounts with proper decimal adjustment
+     * @notice Calculate token amounts with optimized memory usage
+     * @param tokenType Type of token to exchange
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param tokenUsdPrice Token price in USD (18 decimals)
+     * @param jpyUsdPrice JPY/USD price (18 decimals)
+     * @return result Token amount calculation result
+     */
+    function _calculateTokenAmountsOptimized(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint tokenUsdPrice,
+        uint jpyUsdPrice
+    ) internal view returns (TokenAmountResult memory result) {
+        // Load config once and cache relevant values
+        TokenConfig storage config = tokenConfigs[tokenType];
+        uint exchangeFeeRate = config.exchangeFee;
+        uint8 tokenDecimals = config.decimals;
+
+        // Load operational fee config
+        OperationalFeeConfig storage opFeeConfig = operationalFeeConfigs[tokenType];
+        uint operationalFeeRate = opFeeConfig.isEnabled ? opFeeConfig.feeRate : 0;
+
+        // Calculate JPY amount using cached NLP_TO_JPY_RATE
+        uint jpyAmount;
+        unchecked {
+            jpyAmount = Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
+        }
+
+        // Calculate gross USD amount
+        uint grossAmountInUSD = Math.mulDiv(jpyAmount, jpyUsdPrice, 1e18);
+
+        // Calculate total fee rate to reduce operations
+        uint totalFeeRate = exchangeFeeRate + operationalFeeRate;
+        uint totalFeeInUSD = (grossAmountInUSD * totalFeeRate) / 10000;
+
+        // Calculate individual fees
+        uint exchangeFeeInUSD = (grossAmountInUSD * exchangeFeeRate) / 10000;
+        uint operationalFeeInUSD = totalFeeInUSD - exchangeFeeInUSD;
+
+        // Calculate net amount
+        uint netAmountInUSD = grossAmountInUSD - totalFeeInUSD;
+
+        // Optimized token amount calculation
+        if (tokenDecimals == 18) {
+            // 18 decimals - direct calculation
+            result.tokenAmount = Math.mulDiv(netAmountInUSD, 1e18, tokenUsdPrice);
+            result.exchangeFee = Math.mulDiv(exchangeFeeInUSD, 1e18, tokenUsdPrice);
+            result.operationalFee = Math.mulDiv(operationalFeeInUSD, 1e18, tokenUsdPrice);
+        } else {
+            // Non-18 decimals - use cached decimal multiplier
+            uint decimalMultiplier = 10 ** tokenDecimals;
+            result.tokenAmount = Math.mulDiv(netAmountInUSD, decimalMultiplier, tokenUsdPrice);
+            result.exchangeFee = Math.mulDiv(exchangeFeeInUSD, decimalMultiplier, tokenUsdPrice);
+            result.operationalFee =
+                Math.mulDiv(operationalFeeInUSD, decimalMultiplier, tokenUsdPrice);
+        }
+    }
+
+    /**
+     * @notice Optimized execute exchange function
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param user User address
+     * @param relayer Relayer address (address(0) for direct exchange)
+     * @param minAmountOut Minimum amount of tokens to receive
+     */
+    function _executeExchangeOptimized(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        uint minAmountOut
+    ) internal {
+        // Get prices in one call
+        uint tokenUsdPrice = _getTokenPriceOptimized(tokenType);
+        uint jpyUsdPrice = _getJPYUSDPriceOptimized();
+
+        // Calculate token amounts with optimized function
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmountsOptimized(tokenType, nlpAmount, tokenUsdPrice, jpyUsdPrice);
+
+        // Slippage protection check
+        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
+            revert SlippageToleranceExceeded(
+                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
+            );
+        }
+
+        // Optimized balance check using storage reference
+        if (tokenType == TokenType.ETH) {
+            if (address(this).balance < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, address(this).balance
+                );
+            }
+        } else {
+            // Load token address once from storage
+            address tokenAddress = tokenConfigs[tokenType].tokenAddress;
+            IERC20Extended token = IERC20Extended(tokenAddress);
+            uint contractBalance = token.balanceOf(address(this));
+            if (contractBalance < amountResult.tokenAmount) {
+                revert InsufficientBalance(tokenType, amountResult.tokenAmount, contractBalance);
+            }
+        }
+
+        // Update statistics efficiently using storage references
+        TokenStats storage stats = tokenStats[tokenType];
+        unchecked {
+            stats.totalExchanged += nlpAmount;
+            stats.totalTokenSent += amountResult.tokenAmount;
+            stats.totalExchangeFeeCollected += amountResult.exchangeFee;
+            stats.totalOperationalFeeCollected += amountResult.operationalFee;
+            stats.exchangeCount += 1;
+        }
+
+        // Update operational fee collection if applicable
+        if (amountResult.operationalFee > 0) {
+            unchecked {
+                collectedOperationalFees[tokenType] += amountResult.operationalFee;
+            }
+        }
+
+        // Update user records efficiently
+        unchecked {
+            userExchangeAmount[user][tokenType] += nlpAmount;
+            userTokenReceived[user][tokenType] += amountResult.tokenAmount;
+        }
+
+        // Execute token transfer
+        _executeTokenTransferOptimized(
+            tokenType, nlpAmount, user, relayer, tokenUsdPrice, jpyUsdPrice, amountResult
+        );
+    }
+
+    /**
+     * @notice Optimized token transfer function
+     */
+    function _executeTokenTransferOptimized(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        uint tokenUsdPrice,
+        uint jpyUsdPrice,
+        TokenAmountResult memory amountResult
+    ) internal {
+        // Burn NLP tokens
+        try nlpToken.burnFrom(user, nlpAmount) {
+            // Burn successful
+        } catch {
+            revert ExchangeFailed(user, nlpAmount);
+        }
+
+        // Send tokens to user
+        if (tokenType == TokenType.ETH) {
+            Address.sendValue(payable(user), amountResult.tokenAmount);
+        } else {
+            // Use cached token address to avoid storage read
+            address tokenAddress = tokenConfigs[tokenType].tokenAddress;
+            IERC20Extended token = IERC20Extended(tokenAddress);
+            if (!token.transfer(user, amountResult.tokenAmount)) revert TransferFailed();
+        }
+
+        // Emit appropriate event
+        if (relayer == address(0)) {
+            emit ExchangeExecuted(
+                user,
+                tokenType,
+                nlpAmount,
+                amountResult.tokenAmount,
+                tokenUsdPrice,
+                jpyUsdPrice,
+                amountResult.exchangeFee,
+                amountResult.operationalFee
+            );
+        } else {
+            emit GaslessExchangeExecuted(
+                user,
+                relayer,
+                tokenType,
+                nlpAmount,
+                amountResult.tokenAmount,
+                tokenUsdPrice,
+                jpyUsdPrice,
+                amountResult.exchangeFee,
+                amountResult.operationalFee
+            );
+        }
+    }
+
+    /**
+     * @notice Exchange NLP tokens for specified token (legacy function without slippage protection)
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithSlippage for better protection.
+     */
+    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), 0);
+    }
+
+    /**
+     * @notice Exchange NLP tokens for specified token with slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
+     */
+    function exchangeNLPWithSlippage(TokenType tokenType, uint nlpAmount, uint minAmountOut)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), minAmountOut);
+    }
+
+    /**
+     * @notice Exchange NLP tokens using permit (legacy function without slippage protection)
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
+     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithPermitAndSlippage for better protection.
+     */
+    function exchangeNLPWithPermit(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        // Execute permit
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Execute exchange
+        _executeExchange(tokenType, nlpAmount, user, msg.sender, 0);
+    }
+
+    /**
+     * @notice Exchange NLP tokens using permit with slippage protection
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
+     */
+    function exchangeNLPWithPermitAndSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint minAmountOut,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        // Execute permit
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Execute exchange
+        _executeExchange(tokenType, nlpAmount, user, msg.sender, minAmountOut);
+    }
+
+    /**
+     * @notice Internal function to execute exchange with slippage protection (original version)
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param user User address
+     * @param relayer Relayer address (address(0) for direct exchange)
+     * @param minAmountOut Minimum amount of tokens to receive
+     */
+    function _executeExchange(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        uint minAmountOut
+    ) internal {
+        // Calculate prices
+        PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
+
+        // Calculate token amounts
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
+
+        // Slippage protection check (skip if minAmountOut is 0 for legacy compatibility)
+        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
+            revert SlippageToleranceExceeded(
+                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
+            );
+        }
+
+        // Check balance
+        if (tokenType == TokenType.ETH) {
+            if (address(this).balance < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, address(this).balance
+                );
+            }
+        } else {
+            TokenConfig memory config = tokenConfigs[tokenType];
+            IERC20Extended token = IERC20Extended(config.tokenAddress);
+            if (token.balanceOf(address(this)) < amountResult.tokenAmount) {
+                revert InsufficientBalance(
+                    tokenType, amountResult.tokenAmount, token.balanceOf(address(this))
+                );
+            }
+        }
+
+        // Update statistics (CEI pattern)
+        _updateStatistics(tokenType, nlpAmount, user, amountResult);
+
+        // Execute token transfer and emit events
+        _executeTokenTransfer(tokenType, nlpAmount, user, relayer, priceResult, amountResult);
+    }
+
+    /**
+     * @notice Calculate token amounts with proper decimal adjustment (original version)
      * @param tokenType Type of token to exchange
      * @param nlpAmount Amount of NLP tokens to exchange
      * @param priceResult Price calculation result
@@ -683,7 +1065,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Update statistics and user records
+     * @notice Update statistics and user records (original version)
      * @param tokenType Type of token
      * @param nlpAmount Amount of NLP tokens exchanged
      * @param user User address
@@ -713,7 +1095,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Execute token transfer and emit events
+     * @notice Execute token transfer and emit events (original version)
      * @param tokenType Type of token to transfer
      * @param nlpAmount Amount of NLP tokens exchanged
      * @param user User address
@@ -742,7 +1124,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         } else {
             TokenConfig memory config = tokenConfigs[tokenType];
             IERC20Extended token = IERC20Extended(config.tokenAddress);
-            require(token.transfer(user, amountResult.tokenAmount), "Token transfer failed");
+            if (!token.transfer(user, amountResult.tokenAmount)) revert TransferFailed();
         }
 
         // Emit appropriate event
@@ -772,186 +1154,107 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
     }
 
-    /**
-     * @notice Exchange NLP tokens for specified token using permit for gasless operation
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param deadline Permit deadline
-     * @param v ECDSA signature parameter
-     * @param r ECDSA signature parameter
-     * @param s ECDSA signature parameter
-     * @param user User address (token owner)
-     */
-    function exchangeNLPWithPermit(
-        TokenType tokenType,
-        uint nlpAmount,
-        uint deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s,
-        address user
-    ) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        if (user == address(0)) {
-            revert InvalidUser(user);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        // Execute permit
-        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
-            revert PermitFailed(user, nlpAmount, deadline);
-        }
-
-        // Execute exchange
-        _executeExchange(tokenType, nlpAmount, user, msg.sender);
-    }
-
-    /**
-     * @notice Exchange NLP tokens for specified token
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     */
-    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        _executeExchange(tokenType, nlpAmount, msg.sender, address(0));
-    }
-
-    /**
-     * @notice Internal function to execute exchange
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param user User address
-     * @param relayer Relayer address (address(0) for direct exchange)
-     */
-    function _executeExchange(TokenType tokenType, uint nlpAmount, address user, address relayer)
-        internal
-    {
-        // Calculate prices
-        PriceCalculationResult memory priceResult = _calculatePrices(tokenType);
-
-        // Calculate token amounts
-        TokenAmountResult memory amountResult =
-            _calculateTokenAmounts(tokenType, nlpAmount, priceResult);
-
-        // Check balance
-        if (tokenType == TokenType.ETH) {
-            if (address(this).balance < amountResult.tokenAmount) {
-                revert InsufficientBalance(
-                    tokenType, amountResult.tokenAmount, address(this).balance
-                );
-            }
-        } else {
-            TokenConfig memory config = tokenConfigs[tokenType];
-            IERC20Extended token = IERC20Extended(config.tokenAddress);
-            if (token.balanceOf(address(this)) < amountResult.tokenAmount) {
-                revert InsufficientBalance(
-                    tokenType, amountResult.tokenAmount, token.balanceOf(address(this))
-                );
-            }
-        }
-
-        // Update statistics (CEI pattern)
-        _updateStatistics(tokenType, nlpAmount, user, amountResult);
-
-        // Execute token transfer and emit events
-        _executeTokenTransfer(tokenType, nlpAmount, user, relayer, priceResult, amountResult);
-    }
-
     /* ═══════════════════════════════════════════════════════════════════════
                               PRICE FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Get token price from oracle
+     * @notice Get token price from oracle (internal optimized version)
      * @param tokenType Token type to get price for
      * @return price Token price in USD (18 decimals)
      */
-    function _getTokenPrice(TokenType tokenType) public view returns (uint price) {
-        // Special handling for ETH - use dedicated ETH/USD oracle only
+    function _getTokenPriceOptimized(TokenType tokenType) internal view returns (uint price) {
+        // Optimized conditional logic to reduce gas
         if (tokenType == TokenType.ETH) {
-            try this.getOraclePrice(address(ethUsdPriceFeed), 18) returns (uint oraclePrice) {
-                return oraclePrice;
-            } catch {
-                // Oracle failed - no fallback for ETH
-                revert NoPriceDataAvailable(tokenType);
-            }
-        }
-
-        // Special handling for USDC - use dedicated USDC/USD oracle only
-        if (tokenType == TokenType.USDC) {
+            return _getOraclePriceInternal(address(ethUsdPriceFeed));
+        } else if (tokenType == TokenType.USDC) {
             if (address(usdcUsdPriceFeed) != address(0)) {
-                try this.getOraclePrice(address(usdcUsdPriceFeed), 18) returns (uint oraclePrice) {
-                    return oraclePrice;
-                } catch {
-                    // Oracle failed - no fallback for USDC
-                    revert NoPriceDataAvailable(tokenType);
-                }
-            } else {
-                // Oracle not configured
-                revert NoPriceDataAvailable(tokenType);
+                return _getOraclePriceInternal(address(usdcUsdPriceFeed));
             }
-        }
-
-        // Special handling for USDT - use dedicated USDT/USD oracle only
-        if (tokenType == TokenType.USDT) {
+        } else if (tokenType == TokenType.USDT) {
             if (address(usdtUsdPriceFeed) != address(0)) {
-                try this.getOraclePrice(address(usdtUsdPriceFeed), 18) returns (uint oraclePrice) {
-                    return oraclePrice;
-                } catch {
-                    // Oracle failed - no fallback for USDT
-                    revert NoPriceDataAvailable(tokenType);
-                }
-            } else {
-                // Oracle not configured
-                revert NoPriceDataAvailable(tokenType);
+                return _getOraclePriceInternal(address(usdtUsdPriceFeed));
             }
         }
 
-        // For other tokens (unsupported currently)
         revert NoPriceDataAvailable(tokenType);
     }
 
     /**
-     * @notice Get JPY/USD price from oracle or external data
+     * @notice Get price from oracle (internal optimized version)
+     * @param priceFeedAddress Price feed address
+     * @return price Price in 18 decimals
+     */
+    function _getOraclePriceInternal(address priceFeedAddress) internal view returns (uint price) {
+        AggregatorV3Interface feed = AggregatorV3Interface(priceFeedAddress);
+
+        (uint80 roundId, int priceInt, uint startedAt, uint updatedAt, uint80 answeredInRound) =
+            feed.latestRoundData();
+
+        // Optimized validation
+        if (
+            priceInt <= 0 || updatedAt == 0 || roundId == 0 || answeredInRound < roundId
+                || startedAt == 0
+        ) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        // Cache decimals call to avoid multiple external calls
+        uint8 feedDecimals = feed.decimals();
+
+        // Optimized decimal conversion
+        unchecked {
+            if (feedDecimals == 18) {
+                price = uint(priceInt);
+            } else if (feedDecimals < 18) {
+                price = uint(priceInt) * (10 ** (18 - feedDecimals));
+            } else {
+                price = uint(priceInt) / (10 ** (feedDecimals - 18));
+            }
+        }
+    }
+
+    /**
+     * @notice Get JPY/USD price (optimized version)
      * @return price JPY/USD price (18 decimals)
      */
-    function _getJPYUSDPrice() public view returns (uint price) {
-        // Try Chainlink oracle first
+    function _getJPYUSDPriceOptimized() internal view returns (uint price) {
+        // Try oracle first if available
         if (address(jpyUsdPriceFeed) != address(0)) {
             try this.getOraclePrice(address(jpyUsdPriceFeed), 18) returns (uint oraclePrice) {
                 return oraclePrice;
             } catch {
-                // Oracle failed, fall back to external data
+                // Fall through to external data
             }
         }
 
-        // Use external round data (latestRoundData format)
-        RoundData memory externalRoundData = jpyUsdExternalRoundData;
+        // Use external round data with optimized access
+        RoundData storage externalRoundData = jpyUsdExternalRoundData;
         if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
-            // Convert answer to 18 decimals (assume 8 decimals input like Chainlink)
-            uint priceIn18Decimals = uint(externalRoundData.answer) * (10 ** 10);
-            return priceIn18Decimals;
+            // Optimized decimal conversion (8 to 18 decimals)
+            unchecked {
+                return uint(externalRoundData.answer) * 1e10;
+            }
         }
 
-        // No valid price data available
-        revert NoPriceDataAvailable(TokenType.ETH); // Use ETH as placeholder for JPY
+        revert NoPriceDataAvailable(TokenType.ETH);
+    }
+
+    /**
+     * @notice Get token price from oracle (legacy version for compatibility)
+     * @param tokenType Token type to get price for
+     * @return price Token price in USD (18 decimals)
+     */
+    function _getTokenPrice(TokenType tokenType) public view returns (uint price) {
+        return _getTokenPriceOptimized(tokenType);
+    }
+
+    /**
+     * @notice Get JPY/USD price from oracle or external data (legacy version)
+     * @return price JPY/USD price (18 decimals)
+     */
+    function _getJPYUSDPrice() public view returns (uint price) {
+        return _getJPYUSDPriceOptimized();
     }
 
     /**
@@ -1066,7 +1369,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         ethBalance = address(this).balance;
         isPaused = paused();
 
-        try this._getJPYUSDPrice() returns (uint price) {
+        try this.getLatestJPYPrice() returns (uint price) {
             jpyUsdPrice = price;
         } catch {
             jpyUsdPrice = 0;
@@ -1135,7 +1438,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @dev This function uses oracle if available, otherwise external round data
      */
     function getLatestJPYPrice() external view returns (uint price) {
-        return _getJPYUSDPrice();
+        return _getJPYUSDPriceOptimized();
     }
 
     /**
@@ -1162,6 +1465,98 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      */
     function calculateJPYAmount(uint nlpAmount) external view returns (uint jpyAmount) {
         return Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
+    }
+
+    /**
+     * @notice Calculate minimum amount out with slippage tolerance
+     * @param tokenType Token type to get quote for
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
+     * @return minAmountOut Minimum amount out considering slippage
+     * @return quoteAmount Expected amount without slippage
+     * @dev Use this function to calculate minAmountOut for slippage-protected exchanges
+     */
+    function calculateMinAmountOut(TokenType tokenType, uint nlpAmount, uint slippageToleranceBps)
+        external
+        view
+        returns (uint minAmountOut, uint quoteAmount)
+    {
+        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
+
+        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
+            return (0, 0);
+        }
+
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
+                quoteAmount = amountResult.tokenAmount;
+                // Calculate minimum amount considering slippage
+                minAmountOut = (quoteAmount * (10000 - slippageToleranceBps)) / 10000;
+            } catch {
+                return (0, 0);
+            }
+        } catch {
+            return (0, 0);
+        }
+    }
+
+    /**
+     * @notice Get exchange quote with slippage calculation
+     * @param tokenType Token type to get quote for
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
+     * @return tokenAmount Amount of tokens that would be received
+     * @return tokenUsdRate Token/USD price used
+     * @return jpyUsdRate JPY/USD price used
+     * @return exchangeFee Exchange fee amount in tokens
+     * @return operationalFee Operational fee amount in tokens
+     * @return minAmountOut Minimum amount out considering slippage
+     * @return maxSlippageAmount Maximum possible slippage amount
+     */
+    function getExchangeQuoteWithSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint slippageToleranceBps
+    )
+        external
+        view
+        returns (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee,
+            uint minAmountOut,
+            uint maxSlippageAmount
+        )
+    {
+        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
+
+        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
+
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(tokenType, nlpAmount, priceResult) returns (
+                TokenAmountResult memory amountResult
+            ) {
+                tokenAmount = amountResult.tokenAmount;
+                tokenUsdRate = priceResult.tokenUsdPrice;
+                jpyUsdRate = priceResult.jpyUsdPrice;
+                exchangeFee = amountResult.exchangeFee;
+                operationalFee = amountResult.operationalFee;
+
+                // Calculate slippage protection values
+                minAmountOut = (tokenAmount * (10000 - slippageToleranceBps)) / 10000;
+                maxSlippageAmount = tokenAmount - minAmountOut;
+            } catch {
+                return (0, 0, 0, 0, 0, 0, 0);
+            }
+        } catch {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -1192,7 +1587,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(treasury != address(0), "Treasury not set");
+        if (treasury == address(0)) revert TreasuryNotSet();
 
         uint balance = address(this).balance;
         uint withdrawAmount = amount == 0 ? balance : amount;
@@ -1216,11 +1611,11 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         nonReentrant
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
-        require(treasury != address(0), "Treasury not set");
-        require(tokenType != TokenType.ETH, "Use emergencyWithdrawETH for ETH");
+        if (treasury == address(0)) revert TreasuryNotSet();
+        if (tokenType == TokenType.ETH) revert InvalidTokenType(tokenType);
 
         TokenConfig memory config = tokenConfigs[tokenType];
-        require(config.tokenAddress != address(0), "Invalid token config");
+        if (config.tokenAddress == address(0)) revert InvalidTokenConfig();
 
         IERC20Extended token = IERC20Extended(config.tokenAddress);
         uint balance = token.balanceOf(address(this));
@@ -1231,7 +1626,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
 
         emit EmergencyWithdraw(tokenType, treasury, withdrawAmount);
-        require(token.transfer(treasury, withdrawAmount), "Token transfer failed");
+        if (!token.transfer(treasury, withdrawAmount)) revert TransferFailed();
     }
 
     /**
@@ -1239,7 +1634,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @param newTreasury New treasury address
      */
     function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(newTreasury != address(0), "Treasury cannot be zero address");
+        if (newTreasury == address(0)) revert ZeroAddress();
         address oldTreasury = treasury;
         treasury = newTreasury;
         emit TreasuryUpdated(oldTreasury, newTreasury);

@@ -367,7 +367,8 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
             int priceInt,
             /* uint256 startedAt */
             ,
-            uint updatedAt,
+            /* uint updatedAt */
+            ,
             /* uint80 answeredInRound */
         ) = ethUsdPriceFeed.latestRoundData();
 
@@ -393,7 +394,8 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
             int priceInt,
             /* uint256 startedAt */
             ,
-            uint updatedAt,
+            /* uint updatedAt */
+            ,
             /* uint80 answeredInRound */
         ) = jpyUsdPriceFeed.latestRoundData();
 
