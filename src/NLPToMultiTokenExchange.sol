@@ -192,9 +192,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice External price data for tokens
     mapping(TokenType => ExternalPriceData) public externalPrices;
 
-    /// @notice External JPY/USD price data
-    ExternalPriceData public jpyUsdExternalPrice;
-
     /// @notice Exchange statistics per token
     mapping(TokenType => TokenStats) public tokenStats;
 
@@ -251,10 +248,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         TokenType indexed tokenType, uint feeRate, address feeRecipient, bool isEnabled
     );
 
-    /// @notice Emitted when external price is updated
-    event ExternalPriceUpdated(
-        TokenType indexed tokenType, uint newPrice, uint updatedAt, address updatedBy
-    );
+
 
     /// @notice Emitted when JPY/USD external price is updated
     event JPYUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
@@ -524,47 +518,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                            EXTERNAL PRICE UPDATES
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /**
-     * @notice Update external price data for a token (maintains backward compatibility)
-     * @param tokenType Token type to update
-     * @param price New price in USD (18 decimals)
-     */
-    function updateExternalPrice(TokenType tokenType, uint price)
-        external
-        onlyRole(PRICE_UPDATER_ROLE)
-    {
-        if (price == 0) {
-            revert InvalidPriceUpdate(price);
-        }
 
-        externalPrices[tokenType] = ExternalPriceData({
-            price: price,
-            updatedAt: block.timestamp,
-            updatedBy: msg.sender,
-            isValid: true
-        });
-
-        emit ExternalPriceUpdated(tokenType, price, block.timestamp, msg.sender);
-    }
-
-    /**
-     * @notice Update external JPY/USD price data (maintains backward compatibility)
-     * @param price New JPY/USD price (18 decimals)
-     */
-    function updateJPYUSDExternalPrice(uint price) external onlyRole(PRICE_UPDATER_ROLE) {
-        if (price == 0) {
-            revert InvalidPriceUpdate(price);
-        }
-
-        jpyUsdExternalPrice = ExternalPriceData({
-            price: price,
-            updatedAt: block.timestamp,
-            updatedBy: msg.sender,
-            isValid: true
-        });
-
-        emit JPYUSDExternalPriceUpdated(price, block.timestamp, msg.sender);
-    }
 
     /**
      * @notice Update JPY/USD external data in latestRoundData format (recommended for Soneium)
@@ -654,147 +608,13 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         emit USDTUSDOracleUpdated(oldOracle, newUsdtUsdPriceFeed);
     }
 
-    /**
-     * @notice Batch update multiple token prices (maintains backward compatibility)
-     * @param tokenTypes Array of token types to update
-     * @param prices Array of new prices (18 decimals)
-     * @param jpyUsdPrice JPY/USD price (18 decimals)
-     */
-    function batchUpdatePrices(
-        TokenType[] calldata tokenTypes,
-        uint[] calldata prices,
-        uint jpyUsdPrice
-    ) external onlyRole(PRICE_UPDATER_ROLE) {
-        require(tokenTypes.length == prices.length, "Array length mismatch");
 
-        // Update JPY/USD price if provided
-        if (jpyUsdPrice > 0) {
-            jpyUsdExternalPrice = ExternalPriceData({
-                price: jpyUsdPrice,
-                updatedAt: block.timestamp,
-                updatedBy: msg.sender,
-                isValid: true
-            });
-            emit JPYUSDExternalPriceUpdated(jpyUsdPrice, block.timestamp, msg.sender);
-        }
 
-        // Update token prices
-        for (uint i = 0; i < tokenTypes.length; i++) {
-            TokenType tokenType = tokenTypes[i];
-            uint price = prices[i];
 
-            if (price == 0) {
-                revert InvalidPriceUpdate(price);
-            }
 
-            externalPrices[tokenType] = ExternalPriceData({
-                price: price,
-                updatedAt: block.timestamp,
-                updatedBy: msg.sender,
-                isValid: true
-            });
 
-            emit ExternalPriceUpdated(tokenType, price, block.timestamp, msg.sender);
-        }
-    }
 
-    /**
-     * @notice Convenient function to update external price with 8 decimals (typical Chainlink format)
-     * @param tokenType Token type to update
-     * @param price New price in USD (8 decimals)
-     */
-    function updateExternalPrice8Decimals(TokenType tokenType, uint price)
-        external
-        onlyRole(PRICE_UPDATER_ROLE)
-    {
-        if (price == 0) {
-            revert InvalidPriceUpdate(price);
-        }
 
-        // Convert 8 decimals to 18 decimals
-        uint normalizedPrice = price * (10 ** 10);
-
-        externalPrices[tokenType] = ExternalPriceData({
-            price: normalizedPrice,
-            updatedAt: block.timestamp,
-            updatedBy: msg.sender,
-            isValid: true
-        });
-
-        emit ExternalPriceUpdated(tokenType, normalizedPrice, block.timestamp, msg.sender);
-    }
-
-    /**
-     * @notice Convenient function to update JPY/USD price with 8 decimals (typical Chainlink format)
-     * @param price New JPY/USD price (8 decimals)
-     */
-    function updateJPYUSDExternalPrice8Decimals(uint price) external onlyRole(PRICE_UPDATER_ROLE) {
-        if (price == 0) {
-            revert InvalidPriceUpdate(price);
-        }
-
-        // Convert 8 decimals to 18 decimals
-        uint normalizedPrice = price * (10 ** 10);
-
-        jpyUsdExternalPrice = ExternalPriceData({
-            price: normalizedPrice,
-            updatedAt: block.timestamp,
-            updatedBy: msg.sender,
-            isValid: true
-        });
-
-        emit JPYUSDExternalPriceUpdated(normalizedPrice, block.timestamp, msg.sender);
-    }
-
-    /**
-     * @notice Convenient function to batch update prices with 8 decimals (typical Chainlink format)
-     * @param tokenTypes Array of token types to update
-     * @param prices Array of new prices (8 decimals)
-     * @param jpyUsdPrice JPY/USD price (8 decimals)
-     */
-    function batchUpdatePrices8Decimals(
-        TokenType[] calldata tokenTypes,
-        uint[] calldata prices,
-        uint jpyUsdPrice
-    ) external onlyRole(PRICE_UPDATER_ROLE) {
-        require(tokenTypes.length == prices.length, "Array length mismatch");
-
-        // Update JPY/USD price if provided
-        if (jpyUsdPrice > 0) {
-            // Convert 8 decimals to 18 decimals
-            uint normalizedJpyUsdPrice = jpyUsdPrice * (10 ** 10);
-
-            jpyUsdExternalPrice = ExternalPriceData({
-                price: normalizedJpyUsdPrice,
-                updatedAt: block.timestamp,
-                updatedBy: msg.sender,
-                isValid: true
-            });
-            emit JPYUSDExternalPriceUpdated(normalizedJpyUsdPrice, block.timestamp, msg.sender);
-        }
-
-        // Update token prices
-        for (uint i = 0; i < tokenTypes.length; i++) {
-            TokenType tokenType = tokenTypes[i];
-            uint price = prices[i];
-
-            if (price == 0) {
-                revert InvalidPriceUpdate(price);
-            }
-
-            // Convert 8 decimals to 18 decimals
-            uint normalizedPrice = price * (10 ** 10);
-
-            externalPrices[tokenType] = ExternalPriceData({
-                price: normalizedPrice,
-                updatedAt: block.timestamp,
-                updatedBy: msg.sender,
-                isValid: true
-            });
-
-            emit ExternalPriceUpdated(tokenType, normalizedPrice, block.timestamp, msg.sender);
-        }
-    }
 
     /* ═══════════════════════════════════════════════════════════════════════
                             EXCHANGE FUNCTIONS
@@ -1097,88 +917,47 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         view
         returns (uint price, PriceSource source)
     {
-        // Special handling for ETH - use dedicated ETH/USD oracle first, then fallback to external data
+        // Special handling for ETH - use dedicated ETH/USD oracle only
         if (tokenType == TokenType.ETH) {
             try this.getOraclePrice(address(ethUsdPriceFeed), 18) returns (uint oraclePrice) {
                 return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
             } catch {
-                // Oracle failed, fall back to external data for ETH
-                ExternalPriceData memory ethExternalData = externalPrices[tokenType];
-                if (
-                    ethExternalData.isValid
-                        && block.timestamp - ethExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
-                ) {
-                    return (ethExternalData.price, PriceSource.EXTERNAL_DATA);
-                }
-                // No valid price data available
+                // Oracle failed - no fallback for ETH
                 revert NoPriceDataAvailable(tokenType);
             }
         }
 
-        // Special handling for USDC - use dedicated USDC/USD oracle first, then fallback to external data
+        // Special handling for USDC - use dedicated USDC/USD oracle only
         if (tokenType == TokenType.USDC) {
             if (address(usdcUsdPriceFeed) != address(0)) {
                 try this.getOraclePrice(address(usdcUsdPriceFeed), 18) returns (uint oraclePrice) {
                     return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
                 } catch {
-                    // Oracle failed, fall back to external data
+                    // Oracle failed - no fallback for USDC
+                    revert NoPriceDataAvailable(tokenType);
                 }
+            } else {
+                // Oracle not configured
+                revert NoPriceDataAvailable(tokenType);
             }
-            // Use external data
-            ExternalPriceData memory usdcExternalData = externalPrices[tokenType];
-            if (
-                usdcExternalData.isValid
-                    && block.timestamp - usdcExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
-            ) {
-                return (usdcExternalData.price, PriceSource.EXTERNAL_DATA);
-            }
-            // No valid price data available
-            revert NoPriceDataAvailable(tokenType);
         }
 
-        // Special handling for USDT - use dedicated USDT/USD oracle first, then fallback to external data
+        // Special handling for USDT - use dedicated USDT/USD oracle only
         if (tokenType == TokenType.USDT) {
             if (address(usdtUsdPriceFeed) != address(0)) {
                 try this.getOraclePrice(address(usdtUsdPriceFeed), 18) returns (uint oraclePrice) {
                     return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
                 } catch {
-                    // Oracle failed, fall back to external data
+                    // Oracle failed - no fallback for USDT
+                    revert NoPriceDataAvailable(tokenType);
                 }
-            }
-            // Use external data
-            ExternalPriceData memory usdtExternalData = externalPrices[tokenType];
-            if (
-                usdtExternalData.isValid
-                    && block.timestamp - usdtExternalData.updatedAt <= PRICE_STALENESS_THRESHOLD
-            ) {
-                return (usdtExternalData.price, PriceSource.EXTERNAL_DATA);
-            }
-            // No valid price data available
-            revert NoPriceDataAvailable(tokenType);
-        }
-
-        // For other tokens, use the existing logic
-        TokenConfig memory config = tokenConfigs[tokenType];
-
-        // Try Chainlink oracle first
-        if (config.hasOracle) {
-            try this.getOraclePrice(address(config.priceFeed), 18) returns (uint oraclePrice) {
-                return (oraclePrice, PriceSource.CHAINLINK_ORACLE);
-            } catch {
-                // Oracle failed, fall back to external data
+            } else {
+                // Oracle not configured
+                revert NoPriceDataAvailable(tokenType);
             }
         }
 
-        // Use external data
-        ExternalPriceData memory externalData = externalPrices[tokenType];
-        if (
-            externalData.isValid
-                && block.timestamp - externalData.updatedAt <= PRICE_STALENESS_THRESHOLD
-        ) {
-            return (externalData.price, PriceSource.EXTERNAL_DATA);
-        }
-
-        // No valid price data available
+        // For other tokens (unsupported currently)
         revert NoPriceDataAvailable(tokenType);
     }
 
@@ -1207,15 +986,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             // Convert answer to 18 decimals (assume 8 decimals input like Chainlink)
             uint priceIn18Decimals = uint(externalRoundData.answer) * (10 ** 10);
             return (priceIn18Decimals, PriceSource.EXTERNAL_DATA);
-        }
-
-        // Fallback to legacy external data if available
-        ExternalPriceData memory externalData = jpyUsdExternalPrice;
-        if (
-            externalData.isValid
-                && block.timestamp - externalData.updatedAt <= PRICE_STALENESS_THRESHOLD
-        ) {
-            return (externalData.price, PriceSource.EXTERNAL_DATA);
         }
 
         // No valid price data available

@@ -142,13 +142,17 @@ contract DeployMultiTokenExchange is Script {
         require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
         require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        exchange.updateJPYUSDExternalPrice(jpyUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, ethUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDC, usdcUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDT, usdtUsdPrice);
-
-        console.log("Initial external prices set");
-        console.log("WARNING: Update prices with current market values before enabling exchanges!");
+        // Convert 18 decimals to 8 decimals for Chainlink format
+        exchange.updateJPYUSDRoundData(
+            1, // roundId
+            int(jpyUsdPrice / 10**10), // answer: convert to 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles");
+        console.log("WARNING: Ensure oracles are working properly before enabling exchanges!");
 
         vm.stopBroadcast();
 
@@ -280,12 +284,16 @@ contract DeployMultiTokenExchangeLocal is Script {
         require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
         require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        exchange.updateJPYUSDExternalPrice(jpyUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, ethUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDC, usdcUsdPrice);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.USDT, usdtUsdPrice);
-
-        console.log("Initial external prices set for local testing");
+        // Convert 18 decimals to 8 decimals for Chainlink format
+        exchange.updateJPYUSDRoundData(
+            1, // roundId
+            int(jpyUsdPrice / 10**10), // answer: convert to 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles for local testing");
 
         // Fund the exchange contract with test liquidity
         uint ethAmount = 10 ether;

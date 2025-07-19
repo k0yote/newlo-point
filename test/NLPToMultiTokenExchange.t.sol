@@ -348,13 +348,13 @@ contract NLPToMultiTokenExchangeTest is Test {
         );
     }
 
-    function testOnlyPriceUpdaterCanUpdatePrices() public {
+    function testOnlyPriceUpdaterCanUpdateJPYPrice() public {
         vm.prank(user);
         vm.expectRevert();
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
+        exchange.updateJPYUSDRoundData(1, 68000000, block.timestamp, block.timestamp, 1);
 
         vm.prank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
+        exchange.updateJPYUSDRoundData(1, 68000000, block.timestamp, block.timestamp, 1);
     }
 
     function testOnlyEmergencyManagerCanPause() public {
@@ -389,48 +389,37 @@ contract NLPToMultiTokenExchangeTest is Test {
                               PRICE MANAGEMENT TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    function testExternalPriceUpdate() public {
-        uint newPrice = 2600e18; // New ETH price
-
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, newPrice);
-
-        (uint price,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.ETH);
-        assertEq(price, newPrice);
+    function testETHPriceFromOracle() public {
+        // ETH price is now fetched from oracle only
+        uint ethPrice = exchange.getLatestETHPrice();
+        assertTrue(ethPrice > 0, "ETH price should be greater than 0");
     }
 
-    function testBatchPriceUpdate() public {
-        NLPToMultiTokenExchange.TokenType[] memory tokenTypes =
-            new NLPToMultiTokenExchange.TokenType[](2);
-        tokenTypes[0] = NLPToMultiTokenExchange.TokenType.USDC;
-        tokenTypes[1] = NLPToMultiTokenExchange.TokenType.USDT;
-
-        uint[] memory prices = new uint[](2);
-        prices[0] = 1.01e18; // USDC slightly above $1
-        prices[1] = 0.99e18; // USDT slightly below $1
-
-        uint jpyUsdPrice = 0.0068e18; // Updated JPY/USD price
-
-        vm.prank(priceUpdater);
-        exchange.batchUpdatePrices(tokenTypes, prices, jpyUsdPrice);
-
-        (uint usdcPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDC);
-        (uint usdtPrice,,,) = exchange.externalPrices(NLPToMultiTokenExchange.TokenType.USDT);
-        (uint jpyPrice,,,) = exchange.jpyUsdExternalPrice();
-
-        assertEq(usdcPrice, prices[0]);
-        assertEq(usdtPrice, prices[1]);
-        assertEq(jpyPrice, jpyUsdPrice);
+    function testOraclePricesAreWorking() public {
+        // Test that oracle prices are accessible for all tokens
+        assertTrue(exchange.getLatestETHPrice() > 0, "ETH oracle price should work");
+        
+        // JPY price from external round data or oracle
+        (uint jpyPrice,) = exchange.getLatestJPYPrice();
+        assertTrue(jpyPrice > 0, "JPY price should be available");
     }
 
     function testJPYUSDExternalPriceUpdate() public {
         uint newPrice = 0.0068e18; // New JPY/USD price
+        int answer = int(newPrice / 10**10); // Convert to 8 decimals
 
         vm.prank(priceUpdater);
-        exchange.updateJPYUSDExternalPrice(newPrice);
+        exchange.updateJPYUSDRoundData(
+            1, // roundId
+            answer, // answer in 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
 
-        (uint price,,,) = exchange.jpyUsdExternalPrice();
-        assertEq(price, newPrice);
+        (,int retrievedAnswer,,,) = exchange.jpyUsdExternalRoundData();
+        assertEq(retrievedAnswer, answer);
+        assertEq(uint(retrievedAnswer) * 10**10, newPrice); // Check conversion back to 18 decimals
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -503,10 +492,10 @@ contract NLPToMultiTokenExchangeTest is Test {
         exchange.updateMaxFee(10001); // Exceeds 100%
     }
 
-    function testInvalidPriceUpdate() public {
+    function testInvalidJPYPriceUpdate() public {
         vm.prank(priceUpdater);
         vm.expectRevert();
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 0);
+        exchange.updateJPYUSDRoundData(1, 0, block.timestamp, block.timestamp, 1); // Invalid price = 0
     }
 
     function testExchangeWhenPaused() public {
@@ -704,28 +693,19 @@ contract NLPToMultiTokenExchangeTest is Test {
         assertTrue(jpyUsdPrice > 0);
     }
 
-    function testExternalPriceFallback() public {
-        // Disable oracle by setting invalid price feed
-        vm.prank(configManager);
-        exchange.configureToken(
-            NLPToMultiTokenExchange.TokenType.ETH,
-            address(0),
-            address(0), // No oracle
-            18,
-            100,
-            "ETH"
-        );
-
-        // Set external price
-        vm.prank(priceUpdater);
-        exchange.updateExternalPrice(NLPToMultiTokenExchange.TokenType.ETH, 2600e18);
-
-        // Exchange should still work
-        uint nlpAmount = 1000 * 10 ** 18;
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
-        vm.stopPrank();
+    function testOnlyOracleBasedPricing() public {
+        // Test that all token prices come from oracles
+        // ETH price should come from dedicated oracle
+        uint ethPrice = exchange.getLatestETHPrice();
+        assertTrue(ethPrice > 0, "ETH price from oracle should be available");
+        
+        // JPY price should come from external round data
+        (uint jpyPrice,) = exchange.getLatestJPYPrice();
+        assertTrue(jpyPrice > 0, "JPY price should be available");
+        
+        // Get quotes to ensure oracle-based pricing works
+        (uint ethAmount,,,,,) = exchange.getExchangeQuote(NLPToMultiTokenExchange.TokenType.ETH, 1000e18);
+        assertTrue(ethAmount > 0, "ETH exchange quote should work");
     }
 
     /* ═══════════════════════════════════════════════════════════════════════

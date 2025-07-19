@@ -303,29 +303,19 @@ contract DeployLocalScenario is Script {
 
         // 外部価格データの設定（テスト用の価格）
         // JPY/USD価格を設定（例：1 USD = 150 JPY → 1 JPY = 0.006667 USD）
-        nlpExchange.updateJPYUSDExternalPrice(6667000000000000); // 0.006667 USD (18 decimals)
+        // Using Chainlink format: 8 decimals = 66670000 (0.6667 cents per JPY)
+        nlpExchange.updateJPYUSDRoundData(
+            1, // roundId
+            66670000, // answer: 0.006667 USD in 8 decimals
+            block.timestamp, // startedAt
+            block.timestamp, // updatedAt
+            1 // answeredInRound
+        );
         console.log("Updated JPY/USD external price");
 
-        // ETH/USD価格を設定（例：1 ETH = 2000 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.ETH,
-            2000000000000000000000 // 2000 USD (18 decimals)
-        );
-        console.log("Updated ETH/USD external price");
-
-        // USDC/USD価格を設定（例：1 USDC = 1 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.USDC,
-            1000000000000000000 // 1 USD (18 decimals)
-        );
-        console.log("Updated USDC/USD external price");
-
-        // USDT/USD価格を設定（例：1 USDT = 1 USD）
-        nlpExchange.updateExternalPrice(
-            NLPToMultiTokenExchange.TokenType.USDT,
-            1000000000000000000 // 1 USD (18 decimals)
-        );
-        console.log("Updated USDT/USD external price");
+        // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
+        // No external price setting required for these tokens
+        console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles");
 
         // treasuryアドレスを設定
         nlpExchange.setTreasury(ADMIN);
