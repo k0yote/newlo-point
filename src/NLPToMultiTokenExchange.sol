@@ -13,7 +13,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 /**
  * @title NLPToMultiTokenExchange
  * @author NewLo Team
- * @notice NewLo Point (NLP) から複数トークン（ETH, USDC, USDT）への交換コントラクト
+ * @notice Exchange contract from NewLo Point (NLP) to multiple tokens (ETH, USDC, USDT)
  * @dev This contract allows users to exchange NLP tokens for multiple tokens using flexible price feeds
  *
  * @dev Key Features:
@@ -147,8 +147,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
                                 CONSTANTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Exchange rate numerator: NLP to JPY (90 for 0.9 JPY per NLP)
-    uint public NLP_TO_JPY_RATE = 90;
+    /// @notice Exchange rate numerator: NLP to JPY (100 for 1 JPY per NLP)
+    uint public NLP_TO_JPY_RATE = 100;
 
     /// @notice Absolute maximum fee rate (100%)
     uint public constant ABSOLUTE_MAX_FEE = 10000;
