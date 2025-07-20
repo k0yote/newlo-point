@@ -257,7 +257,7 @@ contract SoneiumETHDistributionTest is Test {
         assertFalse(isLowBalance); // 1000 ETH is above 10 ETH threshold
     }
 
-    function testGetMaxDistributableUsers() view public {
+    function testGetMaxDistributableUsers() public view {
         uint maxUsers = distribution.getMaxDistributableUsers(1 ether);
         assertEq(maxUsers, 500); // Should be capped at MAX_BATCH_SIZE
 
@@ -265,7 +265,7 @@ contract SoneiumETHDistributionTest is Test {
         assertEq(maxUsers, 100); // 1000 ETH / 10 ETH per user = 100 users
     }
 
-    function testGetDistributionStats() view public {
+    function testGetDistributionStats() public view {
         // Initial stats
         (
             uint totalDistributed,
@@ -284,7 +284,7 @@ contract SoneiumETHDistributionTest is Test {
         assertFalse(isAntiDuplicateEnabled);
     }
 
-    function testGetUserDistributionInfo() view public {
+    function testGetUserDistributionInfo() public view {
         (uint totalReceived, uint lastReceived, bool canReceiveToday) =
             distribution.getUserDistributionInfo(user1);
 
