@@ -66,7 +66,7 @@ contract SoneiumETHDistribution is AccessControl, ReentrancyGuard, Pausable {
     uint public constant DISTRIBUTION_HISTORY_PERIOD = 86400; // 24 hours
 
     /// @notice Balance threshold below which low balance warnings are emitted
-    uint public constant LOW_BALANCE_THRESHOLD = 10 ether; // 10 ETH
+    uint public constant LOW_BALANCE_THRESHOLD = 0.1 ether; // 0.1 ETH
 
     /* ═══════════════════════════════════════════════════════════════════════
                               MUTABLE STATE

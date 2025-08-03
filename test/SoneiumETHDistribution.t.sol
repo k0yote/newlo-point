@@ -191,13 +191,13 @@ contract SoneiumETHDistributionTest is Test {
 
     function testLowBalanceWarning() public {
         // Create a distribution that will leave balance below threshold
-        uint distributionAmount = INITIAL_BALANCE - 5 ether; // Leave 5 ETH (below 10 ETH threshold)
+        uint distributionAmount = INITIAL_BALANCE - 0.01 ether; // Leave 5 ETH (below 10 ETH threshold)
 
         address[] memory recipients = new address[](1);
         recipients[0] = user1;
 
         vm.expectEmit(true, false, false, true);
-        emit LowBalanceWarning(5 ether, 10 ether);
+        emit LowBalanceWarning(0.01 ether, 0.1 ether);
 
         vm.prank(distributor);
         distribution.distributeEqual(recipients, distributionAmount);

@@ -13,34 +13,40 @@ This guide documents the successful compilation command for Solidity contracts u
 
 ```bash
 ### TokenDistributionV2
-solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/openzeppelin-contracts-upgradeable/contracts @openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts src/TokenDistributionV2.sol -o solc-build
+solc --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/openzeppelin-contracts-upgradeable/contracts @openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts src/TokenDistributionV2.sol -o solc-build
 ```
 
 ```bash
 ### NewLoPoint
-solc --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/openzeppelin-contracts-upgradeable/contracts @openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts src/NewLoPoint.sol -o solc-build
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/openzeppelin-contracts-upgradeable/contracts @openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts src/NewLoPoint.sol -o solc-build
 ```
 
 ```bash
 ### MultiTokenDistribution
-solc --optimize --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/MultiTokenDistribution.sol -o solc-build
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/MultiTokenDistribution.sol -o solc-build
 ```
 
 ```bash
 ### NLPToETHExchange
-solc --optimize --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/chainlink-evm/contracts/ @chainlink/contracts/=lib/chainlink-evm/contracts/ src/NLPToETHExchange.sol -o solc-build
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/chainlink-evm/contracts/ @chainlink/contracts/=lib/chainlink-evm/contracts/ src/NLPToETHExchange.sol -o solc-build
 ```
 
 ```bash
 ### NLPToMultiTokenExchange
-solc --optimize --optimize-runs 200 --evm-version cancun --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/chainlink-evm/contracts/ @chainlink/contracts/=lib/chainlink-evm/contracts/ src/NLPToMultiTokenExchange.sol -o solc-build
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts --include-path lib/chainlink-evm/contracts/ @chainlink/contracts/=lib/chainlink-evm/contracts/ src/NLPToMultiTokenExchange.sol -o solc-build
+```
+
+```bash
+### SoneiumETHDistribution
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/SoneiumETHDistribution.sol -o solc-build
 ```
 
 ## Command Parameters Breakdown
 
 ### Optimization Settings
+- `--optimize`: Enable optimizer
 - `--optimize-runs 200`: Enables optimization with 200 runs, balancing deployment cost and execution cost
-- `--evm-version cancun`: Targets the Cancun EVM version (latest as of solc 0.8.27)
+- `--evm-version prague`: Targets the Prague EVM version (latest as of solc 0.8.27)
 
 ### Output Options
 - `--abi`: Generates ABI (Application Binary Interface) files
