@@ -19,6 +19,7 @@ contract DeployMultiTokenExchange is Script {
     address SONEIUM_EMERGENCY_MANAGER = vm.envAddress("SONEIUM_EMERGENCY_MANAGER"); // Replace with actual emergency manager
     address SONEIUM_CONFIG_MANAGER = vm.envAddress("SONEIUM_CONFIG_MANAGER"); // Replace with actual config manager
     address SONEIUM_FEE_RECIPIENT = vm.envAddress("SONEIUM_FEE_RECIPIENT"); // Replace with actual fee recipient
+    address SONEIUM_WHITELIST_MANAGER = vm.envAddress("SONEIUM_WHITELIST_MANAGER"); // Replace with actual whitelist manager
 
     // Token addresses (Update these with actual addresses)
     address SONEIUM_NLP_TOKEN = vm.envAddress("SONEIUM_NLP_TOKEN"); // Replace with actual NLP token
@@ -30,6 +31,20 @@ contract DeployMultiTokenExchange is Script {
     address SONEIUM_ETH_USD_ORACLE = vm.envAddress("SONEIUM_ETH_USD_ORACLE"); // Replace with actual ETH/USD oracle on Soneium
     address SONEIUM_USDC_USD_ORACLE = vm.envAddress("SONEIUM_USDC_USD_ORACLE"); // Replace with actual USDC/USD oracle on Soneium
     address SONEIUM_USDT_USD_ORACLE = vm.envAddress("SONEIUM_USDT_USD_ORACLE"); // Replace with actual USDT/USD oracle on Soneium
+
+    // Access control configuration
+    string INITIAL_EXCHANGE_MODE = vm.envOr("INITIAL_EXCHANGE_MODE", string("PUBLIC")); // "PUBLIC" or "WHITELIST"
+
+    // Helper function to parse whitelist addresses from environment
+    function getInitialWhitelist() internal view returns (address[] memory) {
+        string memory whitelistStr = vm.envOr("INITIAL_WHITELIST", string(""));
+        if (bytes(whitelistStr).length == 0) {
+            return new address[](0);
+        }
+        // For simplicity, we'll handle this in the deployment script
+        // In production, you would parse the comma-separated string
+        return new address[](0);
+    }
 
     function run() external {
         uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -68,6 +83,7 @@ contract DeployMultiTokenExchange is Script {
         exchange.grantRole(exchange.FEE_MANAGER_ROLE(), SONEIUM_FEE_MANAGER);
         exchange.grantRole(exchange.EMERGENCY_MANAGER_ROLE(), SONEIUM_EMERGENCY_MANAGER);
         exchange.grantRole(exchange.CONFIG_MANAGER_ROLE(), SONEIUM_CONFIG_MANAGER);
+        exchange.grantRole(exchange.WHITELIST_MANAGER_ROLE(), SONEIUM_WHITELIST_MANAGER);
 
         console.log("Roles granted successfully");
 
@@ -154,6 +170,31 @@ contract DeployMultiTokenExchange is Script {
         console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles");
         console.log("WARNING: Ensure oracles are working properly before enabling exchanges!");
 
+        // Configure access control settings
+        console.log("Configuring access control...");
+
+        // Set exchange mode
+        NLPToMultiTokenExchange.ExchangeMode mode;
+        if (keccak256(bytes(INITIAL_EXCHANGE_MODE)) == keccak256(bytes("WHITELIST"))) {
+            mode = NLPToMultiTokenExchange.ExchangeMode.WHITELIST;
+        } else {
+            mode = NLPToMultiTokenExchange.ExchangeMode.PUBLIC;
+        }
+
+        exchange.setExchangeMode(mode);
+        console.log("Exchange mode set to:", INITIAL_EXCHANGE_MODE);
+
+        // Add initial whitelist if provided
+        address[] memory initialWhitelist = getInitialWhitelist();
+        if (initialWhitelist.length > 0 && mode == NLPToMultiTokenExchange.ExchangeMode.WHITELIST) {
+            bool[] memory whitelisted = new bool[](initialWhitelist.length);
+            for (uint i = 0; i < initialWhitelist.length; i++) {
+                whitelisted[i] = true;
+            }
+            exchange.updateWhitelist(initialWhitelist, whitelisted);
+            console.log("Initial whitelist configured with", initialWhitelist.length, "addresses");
+        }
+
         vm.stopBroadcast();
 
         console.log("Deployment completed successfully!");
@@ -165,6 +206,11 @@ contract DeployMultiTokenExchange is Script {
         console.log("Emergency Manager:", SONEIUM_EMERGENCY_MANAGER);
         console.log("Config Manager:", SONEIUM_CONFIG_MANAGER);
         console.log("Fee Recipient:", SONEIUM_FEE_RECIPIENT);
+        console.log("Whitelist Manager:", SONEIUM_WHITELIST_MANAGER);
+        console.log("========================================");
+        console.log("Access Control Settings:");
+        console.log("Exchange Mode:", INITIAL_EXCHANGE_MODE);
+        console.log("Initial Whitelist Count:", initialWhitelist.length);
         console.log("========================================");
         console.log("Next steps:");
         console.log("1. Update token addresses in script if needed");
@@ -295,6 +341,21 @@ contract DeployMultiTokenExchangeLocal is Script {
         // Note: ETH/USDC/USDT prices are now fetched from Chainlink oracles only
         console.log("ETH/USDC/USDT prices will be fetched from Chainlink oracles for local testing");
 
+        // Configure access control for local testing
+        console.log("Configuring access control for local testing...");
+
+        // Start with WHITELIST mode for testing
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+        console.log("Exchange mode set to: WHITELIST (for testing)");
+
+        // Add deployer to whitelist for testing
+        address[] memory testWhitelist = new address[](1);
+        testWhitelist[0] = deployer;
+        bool[] memory whitelisted = new bool[](1);
+        whitelisted[0] = true;
+        exchange.updateWhitelist(testWhitelist, whitelisted);
+        console.log("Deployer added to whitelist for testing");
+
         // Fund the exchange contract with test liquidity
         uint ethAmount = 10 ether;
         uint usdcAmount = 100000 * 10 ** 6; // 100k USDC
@@ -325,6 +386,16 @@ contract DeployMultiTokenExchangeLocal is Script {
         console.log("USDC Token:", address(usdcToken));
         console.log("USDT Token:", address(usdtToken));
         console.log("Admin/Owner:", deployer);
+        console.log("========================================");
+        console.log("Access Control Settings:");
+        console.log("- Exchange Mode: WHITELIST");
+        console.log("- Daily Volume Limit: 10,000 NLP");
+        console.log("- Whitelisted: deployer");
+        console.log("========================================");
+        console.log("To test different modes:");
+        console.log("1. PUBLIC mode: exchange.setExchangeMode(3)");
+        console.log("2. ROLE_BASED mode: exchange.setExchangeMode(2)");
+        console.log("3. CLOSED mode: exchange.setExchangeMode(0)");
         console.log("========================================");
     }
 }

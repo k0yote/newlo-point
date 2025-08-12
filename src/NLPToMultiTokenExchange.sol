@@ -65,6 +65,13 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         USDT
     }
 
+    /// @notice Exchange access control modes
+    enum ExchangeMode {
+        WHITELIST, // Only whitelisted addresses
+        PUBLIC // Anyone can exchange (gas optimized default)
+
+    }
+
     /* ═══════════════════════════════════════════════════════════════════════
                                   STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -164,6 +171,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     bytes32 public constant PRICE_UPDATER_ROLE = keccak256("PRICE_UPDATER_ROLE");
     bytes32 public constant EMERGENCY_MANAGER_ROLE = keccak256("EMERGENCY_MANAGER_ROLE");
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
+    bytes32 public constant WHITELIST_MANAGER_ROLE = keccak256("WHITELIST_MANAGER_ROLE");
 
     /* ═══════════════════════════════════════════════════════════════════════
                               MUTABLE STATE
@@ -186,6 +194,12 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Collected operational fees per token (available for withdrawal)
     mapping(TokenType => uint) public collectedOperationalFees;
+
+    /// @notice Current exchange mode (defaults to PUBLIC for gas efficiency)
+    ExchangeMode public exchangeMode = ExchangeMode.PUBLIC;
+
+    /// @notice Whitelist for exchange access (used in WHITELIST mode)
+    mapping(address => bool) public whitelist;
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    EVENTS
@@ -253,6 +267,12 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     /// @notice Emitted when NLP to JPY exchange rate is updated
     event NLPToJPYRateUpdated(uint oldRate, uint newRate, address updatedBy);
 
+    /// @notice Emitted when exchange mode is updated
+    event ExchangeModeUpdated(ExchangeMode oldMode, ExchangeMode newMode, address updatedBy);
+
+    /// @notice Emitted when address is added/removed from whitelist
+    event WhitelistUpdated(address indexed account, bool whitelisted, address updatedBy);
+
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -281,6 +301,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     error InvalidTokenType(TokenType tokenType);
     error InvalidTokenConfig();
     error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount, uint minAmount);
+    error NotWhitelisted(address user);
+    error InvalidExchangeMode(ExchangeMode mode);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -328,6 +350,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         _grantRole(PRICE_UPDATER_ROLE, _initialAdmin);
         _grantRole(EMERGENCY_MANAGER_ROLE, _initialAdmin);
         _grantRole(FEE_MANAGER_ROLE, _initialAdmin);
+        _grantRole(WHITELIST_MANAGER_ROLE, _initialAdmin);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -602,6 +625,55 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         uint oldRate = NLP_TO_JPY_RATE;
         NLP_TO_JPY_RATE = newRate;
         emit NLPToJPYRateUpdated(oldRate, newRate, msg.sender);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                      ACCESS CONTROL MANAGEMENT FUNCTIONS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Set the exchange mode
+     * @param newMode New exchange mode
+     * @dev Only CONFIG_MANAGER_ROLE can change the exchange mode
+     */
+    function setExchangeMode(ExchangeMode newMode) external onlyRole(CONFIG_MANAGER_ROLE) {
+        ExchangeMode oldMode = exchangeMode;
+        exchangeMode = newMode;
+        emit ExchangeModeUpdated(oldMode, newMode, msg.sender);
+    }
+
+    /**
+     * @notice Add or remove addresses from whitelist
+     * @param accounts Array of addresses to update
+     * @param whitelisted Array of whitelist status for each address
+     * @dev Only WHITELIST_MANAGER_ROLE can manage the whitelist
+     */
+    function updateWhitelist(address[] calldata accounts, bool[] calldata whitelisted)
+        external
+        onlyRole(WHITELIST_MANAGER_ROLE)
+    {
+        require(accounts.length == whitelisted.length, "Array length mismatch");
+
+        for (uint i = 0; i < accounts.length; i++) {
+            whitelist[accounts[i]] = whitelisted[i];
+            emit WhitelistUpdated(accounts[i], whitelisted[i], msg.sender);
+        }
+    }
+
+    /**
+     * @notice Check if user can perform exchange
+     * @param user User address to check
+     * @dev Gas-optimized: checks PUBLIC mode first
+     */
+    function _checkExchangePermission(address user) internal view {
+        // Gas optimization: most common case first
+        if (exchangeMode == ExchangeMode.PUBLIC) {
+            return; // No restrictions
+        } else if (exchangeMode == ExchangeMode.WHITELIST) {
+            if (!whitelist[user]) {
+                revert NotWhitelisted(user);
+            }
+        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -928,6 +1000,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             revert TokenNotEnabled(tokenType);
         }
 
+        // Check exchange permission
+        _checkExchangePermission(msg.sender);
+
         _executeExchange(tokenType, nlpAmount, msg.sender, address(0), 0);
     }
 
@@ -950,6 +1025,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         if (!config.isEnabled) {
             revert TokenNotEnabled(tokenType);
         }
+
+        // Check exchange permission
+        _checkExchangePermission(msg.sender);
 
         _executeExchange(tokenType, nlpAmount, msg.sender, address(0), minAmountOut);
     }
@@ -986,6 +1064,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         if (!config.isEnabled) {
             revert TokenNotEnabled(tokenType);
         }
+
+        // Check exchange permission for user (not relayer)
+        _checkExchangePermission(user);
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
@@ -1031,6 +1112,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         if (!config.isEnabled) {
             revert TokenNotEnabled(tokenType);
         }
+
+        // Check exchange permission for user (not relayer)
+        _checkExchangePermission(user);
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
