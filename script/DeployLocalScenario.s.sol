@@ -321,6 +321,14 @@ contract DeployLocalScenario is Script {
         nlpExchange.setTreasury(ADMIN);
         console.log("Set treasury address");
 
+        // アクセス制御設定 - PUBLIC モード（ガス最小）で開始
+        // ローカル開発環境では制限なしで誰でも交換可能にする
+        nlpExchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.PUBLIC);
+        console.log("Set exchange mode to PUBLIC (gas optimized, no restrictions)");
+
+        // アクセス制御のみ（日次ボリューム制限は削除済み）
+        console.log("Access control: Exchange mode only (no daily volume limits)");
+
         vm.stopBroadcast();
         vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
     }
@@ -420,6 +428,13 @@ contract DeployLocalScenario is Script {
         console.log("USDT Balance:", usdtToken.balanceOf(address(nlpExchange)) / 10 ** 6);
         console.log("Has JPY Oracle:", address(nlpExchange.jpyUsdPriceFeed()) != address(0));
         console.log("Treasury Address:", nlpExchange.treasury());
+
+        // Access control status
+        console.log("\n=== EXCHANGE ACCESS CONTROL ===");
+        uint8 mode = uint8(nlpExchange.exchangeMode());
+        string memory modeStr = mode == 0 ? "WHITELIST" : mode == 1 ? "PUBLIC" : "UNKNOWN";
+        console.log("Exchange Mode:", modeStr);
+        console.log("Status: Anyone can exchange (gas optimized, no daily limits)");
 
         console.log("\n=== ROLES ===");
         console.log(

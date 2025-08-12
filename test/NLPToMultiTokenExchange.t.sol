@@ -10,6 +10,7 @@ import { AggregatorV3Interface } from
 import { MockV3Aggregator } from "../src/mocks/MockV3Aggregator.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/IAccessControl.sol";
 
 contract MockNLPToken is ERC20DecimalsWithMint {
     mapping(address => mapping(address => uint)) public allowances;
@@ -81,6 +82,13 @@ contract MockToken is ERC20DecimalsWithMint {
 }
 
 contract NLPToMultiTokenExchangeTest is Test {
+    // Event declarations for testing
+    event ExchangeModeUpdated(
+        NLPToMultiTokenExchange.ExchangeMode oldMode,
+        NLPToMultiTokenExchange.ExchangeMode newMode,
+        address updatedBy
+    );
+
     NLPToMultiTokenExchange public exchange;
     MockNLPToken public nlpToken;
     MockToken public usdcToken;
@@ -97,6 +105,9 @@ contract NLPToMultiTokenExchangeTest is Test {
     address public emergencyManager = address(0x5);
     address public configManager = address(0x6);
     address public feeRecipient = address(0x7);
+    address public whitelistManager = address(0x8);
+    address public user2 = address(0x9);
+    address public user3 = address(0x10);
 
     uint8 public constant JPY_USD_DECIMALS = 8;
     uint8 public constant ETH_USD_DECIMALS = 8;
@@ -132,6 +143,7 @@ contract NLPToMultiTokenExchangeTest is Test {
         exchange.grantRole(exchange.FEE_MANAGER_ROLE(), feeManager);
         exchange.grantRole(exchange.EMERGENCY_MANAGER_ROLE(), emergencyManager);
         exchange.grantRole(exchange.CONFIG_MANAGER_ROLE(), configManager);
+        exchange.grantRole(exchange.WHITELIST_MANAGER_ROLE(), whitelistManager);
 
         // Configure tokens
         exchange.configureToken(
@@ -188,8 +200,15 @@ contract NLPToMultiTokenExchangeTest is Test {
         usdcToken.mint(address(exchange), 1000000 * 10 ** 6); // 1M USDC
         usdtToken.mint(address(exchange), 1000000 * 10 ** 6); // 1M USDT
 
-        // Fund user with NLP tokens
+        // Fund users with NLP tokens
         nlpToken.transfer(user, 100000 * 10 ** 18);
+        nlpToken.transfer(user2, 50000 * 10 ** 18);
+        nlpToken.transfer(user3, 50000 * 10 ** 18);
+
+        // Exchange mode is PUBLIC by default (gas optimized, no access restrictions)
+        // This ensures minimal gas costs for all exchange operations in tests
+        // The exchange mode is already PUBLIC by default, but we can verify it:
+        assertEq(uint(exchange.exchangeMode()), uint(NLPToMultiTokenExchange.ExchangeMode.PUBLIC));
 
         vm.stopPrank();
     }
@@ -1268,6 +1287,226 @@ contract NLPToMultiTokenExchangeTest is Test {
     /* ═══════════════════════════════════════════════════════════════════════
                               RATE CONFIGURATION TESTS
     ═══════════════════════════════════════════════════════════════════════ */
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                           ACCESS CONTROL TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function testExchangeModePublic() public {
+        // Default mode should be PUBLIC (already verified in setUp)
+        // This test confirms any user can exchange without restrictions
+
+        // Any user should be able to exchange
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), 1000 * 10 ** 18);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18);
+        vm.stopPrank();
+    }
+
+    function testExchangePauseFunctionality() public {
+        // Test pause functionality instead of CLOSED mode
+        vm.prank(owner);
+        exchange.pause();
+
+        // No user should be able to exchange when paused
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), 1000 * 10 ** 18);
+        vm.expectRevert();
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18);
+        vm.stopPrank();
+
+        // Unpause and should work again
+        vm.prank(owner);
+        exchange.unpause();
+
+        // Now exchange should work
+        vm.startPrank(user);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18);
+        vm.stopPrank();
+    }
+
+    function testExchangeModeWhitelist() public {
+        // Set mode to WHITELIST
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+
+        // Non-whitelisted user should fail
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), 1000 * 10 ** 18);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenExchange.NotWhitelisted.selector, user)
+        );
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18);
+        vm.stopPrank();
+
+        // Add user to whitelist
+        address[] memory accounts = new address[](1);
+        accounts[0] = user;
+        bool[] memory whitelisted = new bool[](1);
+        whitelisted[0] = true;
+
+        vm.prank(whitelistManager);
+        exchange.updateWhitelist(accounts, whitelisted);
+
+        // Whitelisted user should succeed
+        vm.startPrank(user);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18);
+        vm.stopPrank();
+    }
+
+    function testWhitelistBatchUpdate() public {
+        // Set mode to WHITELIST
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+
+        // Batch add users to whitelist
+        address[] memory accounts = new address[](3);
+        accounts[0] = user;
+        accounts[1] = user2;
+        accounts[2] = user3;
+
+        bool[] memory whitelisted = new bool[](3);
+        whitelisted[0] = true;
+        whitelisted[1] = true;
+        whitelisted[2] = false;
+
+        vm.prank(whitelistManager);
+        exchange.updateWhitelist(accounts, whitelisted);
+
+        // Check whitelist status
+        assertTrue(exchange.whitelist(user));
+        assertTrue(exchange.whitelist(user2));
+        assertFalse(exchange.whitelist(user3));
+    }
+
+    function testAccessControlWithSlippage() public {
+        // Set mode to WHITELIST
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+
+        // Non-whitelisted user should fail even with slippage protection
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), 1000 * 10 ** 18);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenExchange.NotWhitelisted.selector, user)
+        );
+        exchange.exchangeNLPWithSlippage(NLPToMultiTokenExchange.TokenType.ETH, 1000 * 10 ** 18, 0);
+        vm.stopPrank();
+    }
+
+    function testAccessControlWithPermit() public {
+        // Set mode to WHITELIST
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+
+        // Prepare permit parameters
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        uint8 v = 27;
+        bytes32 r = bytes32(uint(1));
+        bytes32 s = bytes32(uint(2));
+
+        // Non-whitelisted user should fail even with permit
+        vm.prank(user2); // Acting as relayer
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenExchange.NotWhitelisted.selector, user)
+        );
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, deadline, v, r, s, user
+        );
+    }
+
+    function testRoleManagement() public {
+        // Only admin role holders should be able to grant/revoke admin roles
+
+        // Non-admin cannot grant roles - user doesn't have DEFAULT_ADMIN_ROLE
+        bytes32 configManagerRole = exchange.CONFIG_MANAGER_ROLE();
+
+        vm.startPrank(user);
+        vm.expectRevert(); // Generic revert for AccessControl
+        exchange.grantRole(configManagerRole, user2);
+        vm.stopPrank();
+
+        // Owner can grant administrative roles (test with CONFIG_MANAGER_ROLE)
+        vm.startPrank(owner);
+        exchange.grantRole(configManagerRole, user2);
+        assertTrue(exchange.hasRole(configManagerRole, user2));
+
+        // Owner can revoke roles
+        exchange.revokeRole(configManagerRole, user2);
+        assertFalse(exchange.hasRole(configManagerRole, user2));
+        vm.stopPrank();
+    }
+
+    function testExchangeModeEvents() public {
+        vm.prank(configManager);
+        vm.expectEmit(true, true, false, true);
+        emit NLPToMultiTokenExchange.ExchangeModeUpdated(
+            NLPToMultiTokenExchange.ExchangeMode.PUBLIC,
+            NLPToMultiTokenExchange.ExchangeMode.WHITELIST,
+            configManager
+        );
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+    }
+
+    /**
+     * @notice Gas comparison test for different exchange modes
+     * @dev This test demonstrates that PUBLIC mode uses the least gas for access control checks
+     */
+    function testGasComparisonBetweenModes() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+
+        // Setup: Approve tokens once for all tests
+        vm.startPrank(user);
+        nlpToken.approve(address(exchange), nlpAmount * 4);
+        vm.stopPrank();
+
+        // Test 1: PUBLIC mode (default - should use least gas for access control)
+        // The mode is already PUBLIC by default
+        uint gasStartPublic = gasleft();
+        vm.prank(user);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        uint gasUsedPublic = gasStartPublic - gasleft();
+
+        // Test 2: WHITELIST mode
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.WHITELIST);
+
+        // Add user to whitelist
+        address[] memory accounts = new address[](1);
+        accounts[0] = user;
+        bool[] memory whitelisted = new bool[](1);
+        whitelisted[0] = true;
+        vm.prank(whitelistManager);
+        exchange.updateWhitelist(accounts, whitelisted);
+
+        uint gasStartWhitelist = gasleft();
+        vm.prank(user);
+        exchange.exchangeNLP(NLPToMultiTokenExchange.TokenType.ETH, nlpAmount);
+        uint gasUsedWhitelist = gasStartWhitelist - gasleft();
+
+        // Log results for comparison
+        console.log("=== Gas Usage Comparison for Exchange Operations ===");
+        console.log("PUBLIC mode:      ", gasUsedPublic);
+        console.log("WHITELIST mode:   ", gasUsedWhitelist);
+
+        // Calculate additional gas costs (handle potential underflow)
+        if (gasUsedWhitelist > gasUsedPublic) {
+            console.log("Extra gas for WHITELIST vs PUBLIC: +", gasUsedWhitelist - gasUsedPublic);
+        }
+
+        console.log(
+            "Note: Only PUBLIC and WHITELIST modes are supported for simplified access control"
+        );
+
+        // Note: The actual gas difference for access control is minimal (a few hundred gas)
+        // The main benefit of PUBLIC mode is avoiding the storage reads for whitelist/role checks
+        console.log("Note: PUBLIC mode optimizes by skipping access control checks entirely");
+
+        // Reset to PUBLIC mode for other tests
+        vm.prank(configManager);
+        exchange.setExchangeMode(NLPToMultiTokenExchange.ExchangeMode.PUBLIC);
+    }
 
     receive() external payable { }
 }
