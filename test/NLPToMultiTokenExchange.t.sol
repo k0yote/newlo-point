@@ -1406,10 +1406,10 @@ contract NLPToMultiTokenExchangeTest is Test {
         bytes32 r = bytes32(uint(1));
         bytes32 s = bytes32(uint(2));
 
-        // Non-whitelisted user should fail even with permit
+        // Non-whitelisted relayer should fail even with permit
         vm.prank(user2); // Acting as relayer
         vm.expectRevert(
-            abi.encodeWithSelector(NLPToMultiTokenExchange.NotWhitelisted.selector, user)
+            abi.encodeWithSelector(NLPToMultiTokenExchange.NotWhitelisted.selector, user2)
         );
         exchange.exchangeNLPWithPermit(
             NLPToMultiTokenExchange.TokenType.ETH, nlpAmount, deadline, v, r, s, user
