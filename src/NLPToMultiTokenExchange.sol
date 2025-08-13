@@ -1065,8 +1065,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             revert TokenNotEnabled(tokenType);
         }
 
-        // Check exchange permission for user (not relayer)
-        _checkExchangePermission(user);
+        // Check exchange permission for relayer (operator)
+        _checkExchangePermission(msg.sender);
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
@@ -1113,8 +1113,8 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
             revert TokenNotEnabled(tokenType);
         }
 
-        // Check exchange permission for user (not relayer)
-        _checkExchangePermission(user);
+        // Check exchange permission for relayer (operator)
+        _checkExchangePermission(msg.sender);
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
