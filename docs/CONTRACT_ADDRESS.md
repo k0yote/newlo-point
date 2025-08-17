@@ -8,6 +8,7 @@
 | **NewLoPointFactory** | [`0xd9a7F28364F350005E304b2Bc0ee31aDeb765148`](https://soneium.blockscout.com/address/0xd9a7F28364F350005E304b2Bc0ee31aDeb765148) | Factory contract for deterministic deployment |
 | **NewLoPoint** | [`0x968788ACb90eAE66dB0864573dD34Fc584d138E6`](https://soneium.blockscout.com/address/0x968788ACb90eAE66dB0864573dD34Fc584d138E6) | Main ERC20 token contract with gradual transfer controls |
 | **TokenDistributionV2** | [`0xdA79112C47C69dFd73ed84958cAD6582cBB5203e`](https://soneium.blockscout.com/address/0xdA79112C47C69dFd73ed84958cAD6582cBB5203e) | Ultra-efficient bulk distribution contract (92% gas savings) |
+| **NLPToMultiTokenExchange** | [`0xe88C1a3881049C2eE65804F96CCd05DdAe02a17E`](https://soneium.blockscout.com/address/0xe88C1a3881049C2eE65804F96CCd05DdAe02a17E) | Exchange contract from NewLo Point (NLP) to multiple tokens (ETH, USDC, USDT) |
 
 ### Soneium Minato Testnet
 | Contract | Address | Description |
