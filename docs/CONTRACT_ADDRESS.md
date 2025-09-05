@@ -20,6 +20,13 @@
 | **NLPToMultiTokenExchange** | [`0x277bFeC2194B389Bb975035EB72D157f9eAa3887`](https://soneium-minato.blockscout.com/address/0x277bFeC2194B389Bb975035EB72D157f9eAa3887) | Exchange contract from NewLo Point (NLP) to multiple tokens (ETH, USDC, USDT) |
 | **SoneiumETHDistribution** | [`0x8897494ac5B05486c76919055f68904344d78f5e`](https://soneium-minato.blockscout.com/address/0x8897494ac5B05486c76919055f68904344d78f5e) | Ultra-efficient bulk ETH distribution contract for Soneium network |
 
+### Kairos(KAIA) Testnet
+| Contract | Address | Description |
+|----------|---------|-------------|
+| **NewLoPointFactory** | [`0x78DDE4fC369CA1F855F0271D8fa91E12e5ddDD91`](https://kairos.kaiascan.io/address/0x78DDE4fC369CA1F855F0271D8fa91E12e5ddDD91) | Factory contract for deterministic deployment |
+| **NewLoPoint** | [`0x953E835f5a6A0D51C21445BAF168c0621549684e`](https://kairos.kaiascan.io/address/0x953E835f5a6A0D51C21445BAF168c0621549684e) | Main ERC20 token contract with gradual transfer controls |
+| **TokenDistributionV2** | [`0x065A77bD8D7C3aec27B4F23B360D35379A2A01a9`](https://kairos.kaiascan.io/address/0x065A77bD8D7C3aec27B4F23B360D35379A2A01a9) | Ultra-efficient bulk distribution contract (92% gas savings) |
+
 ### Transfer Control Logic
 
 ```mermaid

@@ -76,7 +76,7 @@ contract ERC20DecimalsTest is Test {
      * @notice Test basic ERC20 functionality with custom decimals
      * @dev Verify that decimal configuration doesn't break standard ERC20 operations
      */
-    function testBasicERC20Functionality() public {
+    function testBasicERC20Functionality() public view {
         // Initial state
         assertEq(token6.totalSupply(), 0);
         assertEq(token6.balanceOf(USER_A), 0);
