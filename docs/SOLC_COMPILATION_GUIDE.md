@@ -41,6 +41,16 @@ solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path
 solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/SoneiumETHDistribution.sol -o solc-build
 ```
 
+```bash
+### NLPToMultiTokenExchange
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . --include-path lib/openzeppelin-contracts/contracts @openzeppelin/contracts=lib/openzeppelin-contracts/contracts src/NLPToMultiTokenKaiaExchange.sol -o solc-build
+```
+
+```bash
+### NLPToMultiTokenExchange
+solc --optimize --optimize-runs 200 --evm-version prague --abi --bin --base-path . src/pyth/IPyth.sol -o solc-build
+```
+
 ## Command Parameters Breakdown
 
 ### Optimization Settings
