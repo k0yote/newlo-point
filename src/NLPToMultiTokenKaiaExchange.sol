@@ -6,18 +6,19 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
+import { PythAggregatorV3, IPyth } from "./pyth/PythAggregatorV3.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 
 /**
  * @title NLPToMultiTokenKaiaExchange
  * @author NewLo Team
- * @notice Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT) on Kaia blockchain
- * @dev This contract allows users to exchange NLP tokens for multiple tokens using external price feeds
+ * @notice Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT)
+ * @dev This contract allows users to exchange NLP tokens for multiple tokens using flexible price feeds
  *
  * @dev Key Features:
  *      - Configurable NLP to JPY exchange rate
- * 	    - Multi-token support (KAIA, USDC, USDT)
- *      - External price feed management for all USD pairs
+ *      - Multi-token support (KAIA, USDC, USDT)
+ *      - Oracle-based price management with JPY/USD external data support
  *      - Role-based access control for different administrative functions
  *      - Configurable exchange fees per token
  *      - Operational fee collection system
@@ -28,15 +29,13 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *
  * @dev Exchange Formula:
  *      1. NLP → JPY (configurable rate using numerator/denominator)
- *      2. JPY → USD using external JPY/USD price feed
- *      3. USD → Target Token using external token/USD price feed
+ *      2. JPY → USD using JPY/USD price feed (external)
+ *      3. USD → Target Token using token/USD price feed
  *      Formula: tokenAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
  *
  * @dev Price Data Sources:
- *      - External JPY/USD data in Pyth-compatible format
- *      - External USDC/USD data in Pyth-compatible format
- *      - External USDT/USD data in Pyth-compatible format
- *      - KAIA uses external KAIA/USD data in Pyth-compatible format
+ *      - Chainlink Oracle for KAIA/USDC/USDT (when available)
+ *      - External JPY/USD data in Chainlink format (for Kaia environment)
  *
  * @dev Security Features:
  *      - Reentrancy protection
@@ -60,7 +59,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     /// @notice Supported token types for exchange
     enum TokenType {
-        KAIA, // Native KAIA token
+        KAIA,
         USDC,
         USDT
     }
@@ -76,7 +75,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
                                   STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Round data structure matching Pyth's price format
+    /// @notice Round data structure migrating from chainlink to pyth network's latestRoundData
     struct RoundData {
         uint80 roundId;
         int answer;
@@ -88,9 +87,11 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice Token configuration
     struct TokenConfig {
         address tokenAddress; // Token contract address (address(0) for KAIA)
+        PythAggregatorV3 priceFeed; // Pyth price feed (if available)
         uint8 decimals; // Token decimals
         uint exchangeFee; // Exchange fee in basis points (100 = 1%)
         bool isEnabled; // Whether exchanges are enabled for this token
+        bool hasOracle; // Whether Pyth oracle is available
         string symbol; // Token symbol for events
     }
 
@@ -130,6 +131,18 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice NewLo Point token contract
     IERC20Extended public immutable nlpToken;
 
+    /// @notice Chainlink KAIA/USD price feed (always required)
+    PythAggregatorV3 public kaiaUsdPriceFeed;
+
+    /// @notice Chainlink USDC/USD price feed (updatable, address(0) if not available)
+    PythAggregatorV3 public usdcUsdPriceFeed;
+
+    /// @notice Chainlink USDT/USD price feed (updatable, address(0) if not available)
+    PythAggregatorV3 public usdtUsdPriceFeed;
+
+    /// @notice External JPY/USD round data (used when jpyUsdPriceFeed is address(0))
+    RoundData public jpyUsdExternalRoundData;
+
     /// @notice Treasury address for emergency withdrawals
     address public treasury;
 
@@ -159,18 +172,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /* ═══════════════════════════════════════════════════════════════════════
                               MUTABLE STATE
     ═══════════════════════════════════════════════════════════════════════ */
-
-    /// @notice External JPY/USD round data (used for JPY/USD conversion)
-    RoundData public jpyUsdExternalRoundData;
-
-    /// @notice External KAIA/USD round data (used for KAIA/USD conversion)
-    RoundData public kaiaUsdExternalRoundData;
-
-    /// @notice External USDC/USD round data (used for USDC/USD conversion)
-    RoundData public usdcUsdExternalRoundData;
-
-    /// @notice External USDT/USD round data (used for USDT/USD conversion)
-    RoundData public usdtUsdExternalRoundData;
 
     /// @notice Token configurations
     mapping(TokenType => TokenConfig) public tokenConfigs;
@@ -238,15 +239,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice Emitted when JPY/USD external price is updated
     event JPYUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
 
-    /// @notice Emitted when KAIA/USD external price is updated
-    event KAIAUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
-
-    /// @notice Emitted when USDC/USD external price is updated
-    event USDCUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
-
-    /// @notice Emitted when USDT/USD external price is updated
-    event USDTUSDExternalPriceUpdated(uint newPrice, uint updatedAt, address updatedBy);
-
     /// @notice Emitted when operational fee is withdrawn
     event OperationalFeeWithdrawn(TokenType indexed tokenType, address indexed to, uint amount);
 
@@ -258,6 +250,21 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     /// @notice Emitted when treasury address is updated
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+
+    /// @notice Emitted when KAIA/USD oracle address is updated
+    event KAIAUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
+
+    /// @notice Emitted when USDC/USD oracle address is updated
+    event USDCUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
+
+    /// @notice Emitted when USDT/USD oracle address is updated
+    event USDTUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
 
     /// @notice Emitted when NLP to JPY exchange rate is updated
     event NLPToJPYRateUpdated(uint oldRate, uint newRate, address updatedBy);
@@ -298,21 +305,44 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount, uint minAmount);
     error NotWhitelisted(address user);
     error InvalidExchangeMode(ExchangeMode mode);
+    error InvalidPriceId(bytes32 priceId);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Initialize the multi-token exchange contract for Kaia blockchain
+     * @notice Initialize the multi-token exchange contract
      * @param _nlpToken NewLo Point token contract address
+     * @param _pythAddress Pyth Network contract address
+     * @param _kaiaUsdPriceId Pyth price ID for KAIA/USD
+     * @param _usdcUsdPriceId Pyth price ID for USDC/USD
+     * @param _usdtUsdPriceId Pyth price ID for USDT/USD
      * @param _initialAdmin Initial admin of the contract
      */
-    constructor(address _nlpToken, address _initialAdmin) {
+    constructor(
+        address _nlpToken,
+        address _pythAddress,
+        bytes32 _kaiaUsdPriceId,
+        bytes32 _usdcUsdPriceId,
+        bytes32 _usdtUsdPriceId,
+        address _initialAdmin
+    ) {
         if (_nlpToken == address(0)) revert ZeroAddress();
+        if (_pythAddress == address(0)) revert ZeroAddress();
+        if (_kaiaUsdPriceId == bytes32(0)) revert InvalidPriceId(_kaiaUsdPriceId);
         if (_initialAdmin == address(0)) revert ZeroAddress();
 
         nlpToken = IERC20Extended(_nlpToken);
+        kaiaUsdPriceFeed = new PythAggregatorV3(_pythAddress, _kaiaUsdPriceId);
+
+        if (_usdcUsdPriceId != bytes32(0)) {
+            usdcUsdPriceFeed = new PythAggregatorV3(_pythAddress, _usdcUsdPriceId);
+        }
+
+        if (_usdtUsdPriceId != bytes32(0)) {
+            usdtUsdPriceFeed = new PythAggregatorV3(_pythAddress, _usdtUsdPriceId);
+        }
 
         // Set up access control roles
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
@@ -330,7 +360,9 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /**
      * @notice Configure a token for exchange
      * @param tokenType Token type to configure
-     * @param tokenAddress Token contract address (address(0) for KAIA)
+     * @param tokenAddress Token contract address (address(0) for ETH)
+     * @param pythAddress Pyth Network contract address
+     * @param priceId Pyth price ID
      * @param decimals Token decimals
      * @param exchangeFee Exchange fee in basis points
      * @param symbol Token symbol
@@ -338,6 +370,8 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     function configureToken(
         TokenType tokenType,
         address tokenAddress,
+        address pythAddress,
+        bytes32 priceId,
         uint8 decimals,
         uint exchangeFee,
         string memory symbol
@@ -346,11 +380,23 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             revert InvalidExchangeFee(exchangeFee, maxFee);
         }
 
+        if (pythAddress == address(0)) {
+            revert ZeroAddress();
+        }
+
+        if (priceId == bytes32(0)) {
+            revert InvalidPriceId(priceId);
+        }
+
         tokenConfigs[tokenType] = TokenConfig({
             tokenAddress: tokenAddress,
+            priceFeed: pythAddress != address(0) && priceId != bytes32(0)
+                ? new PythAggregatorV3(pythAddress, priceId)
+                : new PythAggregatorV3(address(0), bytes32(0)),
             decimals: decimals,
             exchangeFee: exchangeFee,
             isEnabled: true,
+            hasOracle: pythAddress != address(0) && priceId != bytes32(0),
             symbol: symbol
         });
 
@@ -492,7 +538,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Update JPY/USD external data in latestRoundData format
+     * @notice Update JPY/USD external data in latestRoundData format (recommended for Soneium)
      * @param roundId Round ID
      * @param answer Price answer (8 decimals, like Chainlink format)
      * @param startedAt Round start timestamp
@@ -523,96 +569,76 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Update KAIA/USD external data in latestRoundData format
-     * @param roundId Round ID
-     * @param answer Price answer (8 decimals, like Chainlink format)
-     * @param startedAt Round start timestamp
-     * @param updatedAt Round update timestamp
-     * @param answeredInRound Answered in round
-     * @dev This function provides KAIA/USD data in the same format as Chainlink oracles
+     * @notice Update USDC/USD oracle address
+     * @param newPythAddress New Pyth Network contract address
+     * @param newKaiaUsdPriceId New KAIA/USD price ID
+     * @dev This allows updating the USDC/USD oracle address
      */
-    function updateKAIAUSDRoundData(
-        uint80 roundId,
-        int answer,
-        uint startedAt,
-        uint updatedAt,
-        uint80 answeredInRound
-    ) external onlyRole(PRICE_UPDATER_ROLE) {
-        if (answer <= 0) revert InvalidPriceAnswer(answer);
-        if (updatedAt == 0) revert InvalidTimestamp(updatedAt);
-        if (startedAt == 0) revert InvalidTimestamp(startedAt);
+    function updateKAIAUSDOracle(address newPythAddress, bytes32 newKaiaUsdPriceId)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (newPythAddress == address(0)) {
+            revert ZeroAddress();
+        }
 
-        kaiaUsdExternalRoundData = RoundData({
-            roundId: roundId,
-            answer: answer,
-            startedAt: startedAt,
-            updatedAt: updatedAt,
-            answeredInRound: answeredInRound
-        });
+        if (newKaiaUsdPriceId == bytes32(0)) {
+            revert InvalidPriceId(newKaiaUsdPriceId);
+        }
 
-        emit KAIAUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
+        address oldOracle = address(kaiaUsdPriceFeed.pyth());
+        bytes32 oldPriceId = kaiaUsdPriceFeed.priceId();
+        kaiaUsdPriceFeed = new PythAggregatorV3(newPythAddress, newKaiaUsdPriceId);
+        emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newKaiaUsdPriceId);
     }
 
     /**
-     * @notice Update USDC/USD external data in latestRoundData format
-     * @param roundId Round ID
-     * @param answer Price answer (8 decimals, like Chainlink format)
-     * @param startedAt Round start timestamp
-     * @param updatedAt Round update timestamp
-     * @param answeredInRound Answered in round
-     * @dev This function provides USDC/USD data in the same format as Chainlink oracles
+     * @notice Update USDC/USD oracle address
+     * @param newPythAddress New Pyth Network contract address
+     * @param newUsdcUsdPriceId New USDC/USD price ID
+     * @dev This allows updating the USDC/USD oracle address
      */
-    function updateUSDCUSDRoundData(
-        uint80 roundId,
-        int answer,
-        uint startedAt,
-        uint updatedAt,
-        uint80 answeredInRound
-    ) external onlyRole(PRICE_UPDATER_ROLE) {
-        if (answer <= 0) revert InvalidPriceAnswer(answer);
-        if (updatedAt == 0) revert InvalidTimestamp(updatedAt);
-        if (startedAt == 0) revert InvalidTimestamp(startedAt);
+    function updateUSDCUSDOracle(address newPythAddress, bytes32 newUsdcUsdPriceId)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (newPythAddress == address(0)) {
+            revert ZeroAddress();
+        }
 
-        usdcUsdExternalRoundData = RoundData({
-            roundId: roundId,
-            answer: answer,
-            startedAt: startedAt,
-            updatedAt: updatedAt,
-            answeredInRound: answeredInRound
-        });
+        if (newUsdcUsdPriceId == bytes32(0)) {
+            revert InvalidPriceId(newUsdcUsdPriceId);
+        }
 
-        emit USDCUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
+        address oldOracle = address(usdcUsdPriceFeed.pyth());
+        bytes32 oldPriceId = usdcUsdPriceFeed.priceId();
+        usdcUsdPriceFeed = new PythAggregatorV3(newPythAddress, newUsdcUsdPriceId);
+        emit USDCUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newUsdcUsdPriceId);
     }
 
     /**
-     * @notice Update USDT/USD external data in latestRoundData format
-     * @param roundId Round ID
-     * @param answer Price answer (8 decimals, like Chainlink format)
-     * @param startedAt Round start timestamp
-     * @param updatedAt Round update timestamp
-     * @param answeredInRound Answered in round
-     * @dev This function provides USDT/USD data in the same format as Chainlink oracles
+     * @notice Update USDT/USD oracle address
+     * @param newPythAddress New Pyth Network contract address
+     * @param newUsdtUsdPriceId New USDT/USD price ID
+     * @dev This allows updating the USDT/USD oracle address
      */
-    function updateUSDTUSDRoundData(
-        uint80 roundId,
-        int answer,
-        uint startedAt,
-        uint updatedAt,
-        uint80 answeredInRound
-    ) external onlyRole(PRICE_UPDATER_ROLE) {
-        if (answer <= 0) revert InvalidPriceAnswer(answer);
-        if (updatedAt == 0) revert InvalidTimestamp(updatedAt);
-        if (startedAt == 0) revert InvalidTimestamp(startedAt);
+    function updateUSDTUSDOracle(address newPythAddress, bytes32 newUsdtUsdPriceId)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (newPythAddress == address(0)) {
+            revert ZeroAddress();
+        }
 
-        usdtUsdExternalRoundData = RoundData({
-            roundId: roundId,
-            answer: answer,
-            startedAt: startedAt,
-            updatedAt: updatedAt,
-            answeredInRound: answeredInRound
-        });
+        if (newUsdtUsdPriceId == bytes32(0)) {
+            revert InvalidPriceId(newUsdtUsdPriceId);
+        }
 
-        emit USDTUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
+        address oldOracle = address(usdtUsdPriceFeed.pyth());
+
+        bytes32 oldPriceId = usdtUsdPriceFeed.priceId();
+        usdtUsdPriceFeed = new PythAggregatorV3(newPythAddress, newUsdtUsdPriceId);
+        emit USDTUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newUsdtUsdPriceId);
     }
 
     /**
@@ -677,64 +703,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
-                              PRICE FUNCTIONS
-    ═══════════════════════════════════════════════════════════════════════ */
-
-    /**
-     * @notice Get token price from external price data (internal version)
-     * @param tokenType Token type to get price for
-     * @return price Token price in USD (18 decimals)
-     */
-    function _getTokenPrice(TokenType tokenType) internal view returns (uint price) {
-        if (tokenType == TokenType.KAIA) {
-            RoundData storage externalRoundData = kaiaUsdExternalRoundData;
-            if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
-                // Convert 8 decimals to 18 decimals
-                unchecked {
-                    return uint(externalRoundData.answer) * 1e10;
-                }
-            }
-        } else if (tokenType == TokenType.USDC) {
-            RoundData storage externalRoundData = usdcUsdExternalRoundData;
-            if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
-                // Convert 8 decimals to 18 decimals
-                unchecked {
-                    return uint(externalRoundData.answer) * 1e10;
-                }
-            }
-        } else if (tokenType == TokenType.USDT) {
-            RoundData storage externalRoundData = usdtUsdExternalRoundData;
-            if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
-                // Convert 8 decimals to 18 decimals
-                unchecked {
-                    return uint(externalRoundData.answer) * 1e10;
-                }
-            }
-        } else {
-            revert NoPriceDataAvailable(tokenType);
-        }
-
-        revert NoPriceDataAvailable(tokenType);
-    }
-
-    /**
-     * @notice Get JPY/USD price from external data
-     * @return price JPY/USD price (18 decimals)
-     */
-    function _getJPYUSDPrice() internal view returns (uint price) {
-        RoundData storage externalRoundData = jpyUsdExternalRoundData;
-        if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
-            // Efficient decimal conversion (8 to 18 decimals)
-            unchecked {
-                return uint(externalRoundData.answer) * 1e10;
-            }
-        }
-
-        revert NoPriceDataAvailable(TokenType.KAIA);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════════
-                          EXCHANGE CALCULATION FUNCTIONS
+                            EXCHANGE FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
@@ -851,10 +820,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         );
     }
 
-    /* ═══════════════════════════════════════════════════════════════════════
-                            EXCHANGE FUNCTIONS
-    ═══════════════════════════════════════════════════════════════════════ */
-
     /**
      * @notice Check contract balance for token transfer
      * @param tokenType Type of token to check
@@ -910,6 +875,46 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             userExchangeAmount[user][tokenType] += nlpAmount;
             userTokenReceived[user][tokenType] += amountResult.tokenAmount;
         }
+    }
+
+    /**
+     * @notice Execute exchange function
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param user User address
+     * @param relayer Relayer address (address(0) for direct exchange)
+     * @param minAmountOut Minimum amount of tokens to receive
+     */
+    function _executeExchange(
+        TokenType tokenType,
+        uint nlpAmount,
+        address user,
+        address relayer,
+        uint minAmountOut
+    ) internal {
+        // Get prices and calculate amounts
+        uint tokenUsdPrice = _getTokenPrice(tokenType);
+        uint jpyUsdPrice = _getJPYUSDPrice();
+        TokenAmountResult memory amountResult =
+            _calculateTokenAmounts(tokenType, nlpAmount, tokenUsdPrice, jpyUsdPrice);
+
+        // Slippage protection check
+        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
+            revert SlippageToleranceExceeded(
+                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
+            );
+        }
+
+        // Check contract balance
+        _checkContractBalance(tokenType, amountResult.tokenAmount);
+
+        // Update statistics and user records
+        _updateExchangeStats(tokenType, nlpAmount, user, amountResult);
+
+        // Execute token transfer
+        _executeTokenTransfer(
+            tokenType, nlpAmount, user, relayer, tokenUsdPrice, jpyUsdPrice, amountResult
+        );
     }
 
     /**
@@ -985,39 +990,17 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Execute exchange function
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param user User address
-     * @param relayer Relayer address (address(0) for direct exchange)
-     * @param minAmountOut Minimum amount of tokens to receive
+     * @notice Token transfer function
      */
-    function _executeExchange(
+    function _executeTokenTransfer(
         TokenType tokenType,
         uint nlpAmount,
         address user,
         address relayer,
-        uint minAmountOut
+        uint tokenUsdPrice,
+        uint jpyUsdPrice,
+        TokenAmountResult memory amountResult
     ) internal {
-        // Get prices and calculate amounts
-        uint tokenUsdPrice = _getTokenPrice(tokenType);
-        uint jpyUsdPrice = _getJPYUSDPrice();
-        TokenAmountResult memory amountResult =
-            _calculateTokenAmounts(tokenType, nlpAmount, tokenUsdPrice, jpyUsdPrice);
-
-        // Slippage protection check
-        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
-            revert SlippageToleranceExceeded(
-                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
-            );
-        }
-
-        // Check contract balance
-        _checkContractBalance(tokenType, amountResult.tokenAmount);
-
-        // Update statistics and user records
-        _updateExchangeStats(tokenType, nlpAmount, user, amountResult);
-
         // Burn NLP and transfer tokens
         _burnAndTransfer(tokenType, nlpAmount, user, amountResult.tokenAmount);
 
@@ -1171,6 +1154,135 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
+                              PRICE FUNCTIONS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /**
+     * @notice Get token price from oracle (internal version)
+     * @param tokenType Token type to get price for
+     * @return price Token price in USD (18 decimals)
+     */
+    function _getTokenPrice(TokenType tokenType) internal view returns (uint price) {
+        // Efficient conditional logic to reduce gas
+        if (tokenType == TokenType.KAIA) {
+            return _getOraclePriceInternal(address(kaiaUsdPriceFeed));
+        } else if (tokenType == TokenType.USDC) {
+            if (address(usdcUsdPriceFeed) != address(0)) {
+                return _getOraclePriceInternal(address(usdcUsdPriceFeed));
+            }
+        } else if (tokenType == TokenType.USDT) {
+            if (address(usdtUsdPriceFeed) != address(0)) {
+                return _getOraclePriceInternal(address(usdtUsdPriceFeed));
+            }
+        }
+
+        revert NoPriceDataAvailable(tokenType);
+    }
+
+    /**
+     * @notice Get price from oracle (internal optimized version)
+     * @param priceFeedAddress Price feed address
+     * @return price Price in 18 decimals
+     */
+    function _getOraclePriceInternal(address priceFeedAddress) internal view returns (uint price) {
+        PythAggregatorV3 feed = PythAggregatorV3(priceFeedAddress);
+
+        (uint80 roundId, int priceInt, uint startedAt, uint updatedAt, uint80 answeredInRound) =
+            feed.latestRoundData();
+
+        // Efficient validation
+        if (
+            priceInt <= 0 || updatedAt == 0 || roundId == 0 || answeredInRound < roundId
+                || startedAt == 0
+        ) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        // Cache decimals call to avoid multiple external calls
+        uint8 feedDecimals = feed.decimals();
+
+        // Efficient decimal conversion
+        unchecked {
+            if (feedDecimals == 18) {
+                price = uint(priceInt);
+            } else if (feedDecimals < 18) {
+                price = uint(priceInt) * (10 ** (18 - feedDecimals));
+            } else {
+                price = uint(priceInt) / (10 ** (feedDecimals - 18));
+            }
+        }
+    }
+
+    /**
+     * @notice Get JPY/USD price
+     * @return price JPY/USD price (18 decimals)
+     */
+    function _getJPYUSDPrice() internal view returns (uint price) {
+        // Use external round data with efficient access
+        RoundData storage externalRoundData = jpyUsdExternalRoundData;
+        if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
+            // Efficient decimal conversion (8 to 18 decimals)
+            unchecked {
+                return uint(externalRoundData.answer) * 1e10;
+            }
+        }
+
+        revert NoPriceDataAvailable(TokenType.KAIA);
+    }
+
+    /**
+     * @notice Get price from Chainlink oracle (external function to enable try/catch)
+     * @param priceFeed Price feed address
+     * @param targetDecimals Target decimals for price
+     * @return price Price normalized to target decimals
+     */
+    function getOraclePrice(address priceFeed, uint8 targetDecimals)
+        external
+        view
+        returns (uint price)
+    {
+        PythAggregatorV3 feed = PythAggregatorV3(priceFeed);
+
+        (uint80 roundId, int priceInt, uint startedAt, uint updatedAt, uint80 answeredInRound) =
+            feed.latestRoundData();
+
+        // Enhanced validation as per security audit recommendations
+        if (priceInt <= 0) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        if (updatedAt == 0) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        if (roundId == 0) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        // Check for stale price data
+        if (answeredInRound < roundId) {
+            revert PriceDataStale(updatedAt, 0);
+        }
+
+        // Note: Removed staleness time check to allow flexible oracle update timing
+
+        // Check if the round is complete
+        if (startedAt == 0) {
+            revert InvalidPriceData(priceInt);
+        }
+
+        // Convert to target decimals
+        uint8 feedDecimals = feed.decimals();
+        if (feedDecimals == targetDecimals) {
+            price = uint(priceInt);
+        } else if (feedDecimals < targetDecimals) {
+            price = uint(priceInt) * (10 ** (targetDecimals - feedDecimals));
+        } else {
+            price = uint(priceInt) / (10 ** (feedDecimals - targetDecimals));
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
                                VIEW FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1218,16 +1330,16 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     /**
      * @notice Get current contract status
-     * @return kaiaBalance Current KAIA balance
+     * @return ethBalance Current ETH balance
      * @return isPaused Whether contract is paused
      * @return jpyUsdPrice Current JPY/USD price
      */
     function getContractStatus()
         external
         view
-        returns (uint kaiaBalance, bool isPaused, uint jpyUsdPrice)
+        returns (uint ethBalance, bool isPaused, uint jpyUsdPrice)
     {
-        kaiaBalance = address(this).balance;
+        ethBalance = address(this).balance;
         isPaused = paused();
 
         try this.getLatestJPYPrice() returns (uint price) {
@@ -1285,66 +1397,21 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Get KAIA/USD external round data
-     * @return Round data structure matching Chainlink's latestRoundData
-     * @dev This function returns the external KAIA/USD data in latestRoundData format
+     * @notice Get latest ETH/USD price from dedicated oracle
+     * @return price ETH/USD price (18 decimals)
+     * @dev This function always uses the dedicated ETH/USD oracle
      */
-    function getKAIAUSDExternalRoundData() external view returns (RoundData memory) {
-        return kaiaUsdExternalRoundData;
+    function getLatestETHPrice() external view returns (uint price) {
+        return this.getOraclePrice(address(kaiaUsdPriceFeed), 18);
     }
 
     /**
-     * @notice Get USDC/USD external round data
-     * @return Round data structure matching Chainlink's latestRoundData
-     * @dev This function returns the external USDC/USD data in latestRoundData format
-     */
-    function getUSDCUSDExternalRoundData() external view returns (RoundData memory) {
-        return usdcUsdExternalRoundData;
-    }
-
-    /**
-     * @notice Get USDT/USD external round data
-     * @return Round data structure matching Chainlink's latestRoundData
-     * @dev This function returns the external USDT/USD data in latestRoundData format
-     */
-    function getUSDTUSDExternalRoundData() external view returns (RoundData memory) {
-        return usdtUsdExternalRoundData;
-    }
-
-    /**
-     * @notice Get latest JPY/USD price from external data
+     * @notice Get latest JPY/USD price from oracle or external data
      * @return price JPY/USD price (18 decimals)
-     * @dev This function uses external round data
+     * @dev This function uses oracle if available, otherwise external round data
      */
     function getLatestJPYPrice() external view returns (uint price) {
         return _getJPYUSDPrice();
-    }
-
-    /**
-     * @notice Get latest KAIA/USD price from external data
-     * @return price KAIA/USD price (18 decimals)
-     * @dev This function uses external round data
-     */
-    function getLatestKAIAPrice() external view returns (uint price) {
-        return _getTokenPrice(TokenType.KAIA);
-    }
-
-    /**
-     * @notice Get latest USDC/USD price from external data
-     * @return price USDC/USD price (18 decimals)
-     * @dev This function uses external round data
-     */
-    function getLatestUSDCPrice() external view returns (uint price) {
-        return _getTokenPrice(TokenType.USDC);
-    }
-
-    /**
-     * @notice Get latest USDT/USD price from external data
-     * @return price USDT/USD price (18 decimals)
-     * @dev This function uses external round data
-     */
-    function getLatestUSDTPrice() external view returns (uint price) {
-        return _getTokenPrice(TokenType.USDT);
     }
 
     /**
@@ -1408,6 +1475,63 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         }
     }
 
+    /**
+     * @notice Get exchange quote with slippage calculation
+     * @param tokenType Token type to get quote for
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
+     * @return tokenAmount Amount of tokens that would be received
+     * @return tokenUsdRate Token/USD price used
+     * @return jpyUsdRate JPY/USD price used
+     * @return exchangeFee Exchange fee amount in tokens
+     * @return operationalFee Operational fee amount in tokens
+     * @return minAmountOut Minimum amount out considering slippage
+     * @return maxSlippageAmount Maximum possible slippage amount
+     */
+    function getExchangeQuoteWithSlippage(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint slippageToleranceBps
+    )
+        external
+        view
+        returns (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee,
+            uint minAmountOut,
+            uint maxSlippageAmount
+        )
+    {
+        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
+
+        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
+
+        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
+            try this._calculateTokenAmounts(
+                tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
+            ) returns (TokenAmountResult memory amountResult) {
+                tokenAmount = amountResult.tokenAmount;
+                tokenUsdRate = priceResult.tokenUsdPrice;
+                jpyUsdRate = priceResult.jpyUsdPrice;
+                exchangeFee = amountResult.exchangeFee;
+                operationalFee = amountResult.operationalFee;
+
+                // Calculate slippage protection values
+                minAmountOut = (tokenAmount * (10000 - slippageToleranceBps)) / 10000;
+                maxSlippageAmount = tokenAmount - minAmountOut;
+            } catch {
+                return (0, 0, 0, 0, 0, 0, 0);
+            }
+        } catch {
+            return (0, 0, 0, 0, 0, 0, 0);
+        }
+    }
+
     /* ═══════════════════════════════════════════════════════════════════════
                             ADMIN FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -1427,10 +1551,10 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Emergency withdrawal of KAIA to treasury
+     * @notice Emergency withdrawal of ETH to treasury
      * @param amount Amount to withdraw (0 for all)
      */
-    function emergencyWithdrawKAIA(uint amount)
+    function emergencyWithdrawETH(uint amount)
         external
         whenPaused
         nonReentrant
@@ -1508,9 +1632,9 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Receive KAIA deposits
+     * @notice Receive ETH deposits
      */
     receive() external payable {
-        // Allow KAIA deposits for exchange operations
+        // Allow ETH deposits for exchange operations
     }
 }

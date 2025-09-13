@@ -6,6 +6,7 @@ import { console } from "forge-std/console.sol";
 import { NLPToMultiTokenKaiaExchange } from "../src/NLPToMultiTokenKaiaExchange.sol";
 import { IERC20Extended } from "../src/interfaces/IERC20Extended.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
+import { PythAggregatorV3 } from "../src/pyth/PythAggregatorV3.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/access/IAccessControl.sol";
 
@@ -78,6 +79,34 @@ contract MockTokenKaia is ERC20DecimalsWithMint {
     }
 }
 
+// Mock Pyth Network contract for testing
+contract MockPyth {
+    struct PriceData {
+        int64 price;
+        uint64 conf;
+        int32 expo;
+        uint publishTime;
+    }
+
+    mapping(bytes32 => PriceData) public prices;
+
+    function updatePrice(bytes32 id, int64 price, uint64 conf, int32 expo) external {
+        prices[id] = PriceData(price, conf, expo, block.timestamp);
+    }
+
+    function getPriceUnsafe(bytes32 id) external view returns (PriceData memory) {
+        return prices[id];
+    }
+
+    function getUpdateFee(bytes[] calldata) external pure returns (uint) {
+        return 0;
+    }
+
+    function updatePriceFeeds(bytes[] calldata) external payable {
+        // Mock implementation - do nothing
+    }
+}
+
 contract NLPToMultiTokenKaiaExchangeTest is Test {
     // Event declarations for testing
     event ExchangeModeUpdated(
@@ -86,10 +115,23 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         address updatedBy
     );
 
+    event KAIAUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
+
+    event USDCUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
+
+    event USDTUSDOracleUpdated(
+        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
+    );
+
     NLPToMultiTokenKaiaExchange public exchange;
     MockNLPTokenKaia public nlpToken;
     MockTokenKaia public usdcToken;
     MockTokenKaia public usdtToken;
+    MockPyth public mockPyth;
 
     address public owner = address(0x1);
     address public user = address(0x2);
@@ -102,11 +144,16 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
     address public user2 = address(0x9);
     address public user3 = address(0x10);
 
-    // Mock price data (8 decimals like Chainlink)
-    int public constant JPY_USD_PRICE = 677093; // 1 JPY = 0.00677093 USD (actual data)
-    int public constant KAIA_USD_PRICE = 15000000; // 1 KAIA = 0.15 USD
-    int public constant USDC_USD_PRICE = 99971995; // 1 USDC = 1 USD
-    int public constant USDT_USD_PRICE = 1e8; // 1 USDT = 1 USD
+    // Mock price data (matching Pyth format)
+    int64 public constant JPY_USD_PRICE = 677093; // 1 JPY = 0.00677093 USD (8 decimals)
+    int64 public constant KAIA_USD_PRICE = 15000000; // 1 KAIA = 0.15 USD (8 decimals)
+    int64 public constant USDC_USD_PRICE = 99971995; // 1 USDC = 1 USD (8 decimals)
+    int64 public constant USDT_USD_PRICE = 100000000; // 1 USDT = 1 USD (8 decimals)
+
+    // Pyth price IDs
+    bytes32 public constant KAIA_USD_PRICE_ID = keccak256("KAIA/USD");
+    bytes32 public constant USDC_USD_PRICE_ID = keccak256("USDC/USD");
+    bytes32 public constant USDT_USD_PRICE_ID = keccak256("USDT/USD");
 
     event ExchangeExecuted(
         address indexed user,
@@ -122,13 +169,28 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
     function setUp() public {
         vm.startPrank(owner);
 
-        // Deploy mock tokens
+        // Deploy mock tokens and Pyth
         nlpToken = new MockNLPTokenKaia();
         usdcToken = new MockTokenKaia("USD Coin", "USDC", 6);
         usdtToken = new MockTokenKaia("Tether USD", "USDT", 6);
+        mockPyth = new MockPyth();
 
-        // Deploy exchange contract
-        exchange = new NLPToMultiTokenKaiaExchange(address(nlpToken), owner);
+        // Set up mock Pyth prices
+        mockPyth.updatePrice(KAIA_USD_PRICE_ID, KAIA_USD_PRICE, 0, -8);
+        mockPyth.updatePrice(USDC_USD_PRICE_ID, USDC_USD_PRICE, 0, -8);
+        mockPyth.updatePrice(USDT_USD_PRICE_ID, USDT_USD_PRICE, 0, -8);
+
+        // Deploy exchange contract with simplified constructor
+        exchange = new NLPToMultiTokenKaiaExchange(
+            address(nlpToken),
+            address(mockPyth),
+            KAIA_USD_PRICE_ID,
+            USDC_USD_PRICE_ID, // Optional - can be bytes32(0)
+            USDT_USD_PRICE_ID, // Optional - can be bytes32(0)
+            owner
+        );
+
+        console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
         // Grant roles
         exchange.grantRole(exchange.PRICE_UPDATER_ROLE(), priceUpdater);
@@ -140,10 +202,12 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         // Set treasury
         exchange.setTreasury(feeRecipient);
 
-        // Configure tokens
+        // Configure tokens using the new configureToken function
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
-            address(0),
+            address(0), // Native KAIA
+            address(mockPyth),
+            KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
             "KAIA"
@@ -152,6 +216,8 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDC,
             address(usdcToken),
+            address(mockPyth),
+            USDC_USD_PRICE_ID,
             6,
             50, // 0.5% exchange fee
             "USDC"
@@ -160,10 +226,14 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDT,
             address(usdtToken),
+            address(mockPyth),
+            USDT_USD_PRICE_ID,
             6,
             75, // 0.75% exchange fee
             "USDT"
         );
+
+        console.log("Token configurations completed");
 
         // Configure operational fees
         exchange.configureOperationalFee(
@@ -187,8 +257,8 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
             true
         );
 
-        // Update price data
-        _updatePriceData();
+        // Update JPY/USD price data (external data source)
+        _updateJPYPriceData();
 
         // Fund the exchange contract
         vm.deal(address(exchange), 100 ether);
@@ -208,16 +278,11 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         vm.stopPrank();
     }
 
-    function _updatePriceData() internal {
+    function _updateJPYPriceData() internal {
         uint currentTime = block.timestamp;
 
-        exchange.updateJPYUSDRoundData(1, JPY_USD_PRICE, currentTime, currentTime, 1);
-
-        exchange.updateKAIAUSDRoundData(1, KAIA_USD_PRICE, currentTime, currentTime, 1);
-
-        exchange.updateUSDCUSDRoundData(1, USDC_USD_PRICE, currentTime, currentTime, 1);
-
-        exchange.updateUSDTUSDRoundData(1, USDT_USD_PRICE, currentTime, currentTime, 1);
+        // JPY/USD uses external data source (not Pyth)
+        exchange.updateJPYUSDRoundData(1, int(JPY_USD_PRICE), currentTime, currentTime, 1);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -243,25 +308,67 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         assertEq(config.decimals, 18);
         assertEq(config.exchangeFee, 100);
         assertTrue(config.isEnabled);
+        assertTrue(config.hasOracle);
         assertEq(config.symbol, "KAIA");
     }
 
     function testPriceUpdates() public view {
-        // Test JPY/USD price
+        // Test JPY/USD price (external data)
         uint jpyPrice = exchange.getLatestJPYPrice();
-        assertEq(jpyPrice, uint(JPY_USD_PRICE) * 1e10); // Convert 8->18 decimals
+        assertEq(jpyPrice, uint(int(JPY_USD_PRICE)) * 1e10); // Convert 8->18 decimals
 
-        // Test KAIA/USD price
-        uint kaiaPrice = exchange.getLatestKAIAPrice();
-        assertEq(kaiaPrice, uint(KAIA_USD_PRICE) * 1e10);
+        // Test KAIA/USD price (via getLatestETHPrice)
+        uint kaiaPrice = exchange.getLatestETHPrice();
+        assertEq(kaiaPrice, uint(int(KAIA_USD_PRICE)) * 1e10);
+    }
 
-        // Test USDC/USD price
-        uint usdcPrice = exchange.getLatestUSDCPrice();
-        assertEq(usdcPrice, uint(USDC_USD_PRICE) * 1e10);
+    function testUpdateKAIAOracle() public {
+        bytes32 newPriceId = keccak256("NEW_KAIA/USD");
+        address newPythAddress = address(0x999);
 
-        // Test USDT/USD price
-        uint usdtPrice = exchange.getLatestUSDTPrice();
-        assertEq(usdtPrice, uint(USDT_USD_PRICE) * 1e10);
+        // Deploy new mock Pyth
+        MockPyth newMockPyth = new MockPyth();
+        newMockPyth.updatePrice(newPriceId, KAIA_USD_PRICE, 0, -8);
+
+        vm.expectEmit(true, true, true, true);
+        emit KAIAUSDOracleUpdated(
+            address(mockPyth), KAIA_USD_PRICE_ID, address(newMockPyth), newPriceId
+        );
+
+        vm.prank(owner);
+        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+    }
+
+    function testUpdateUSDCOracle() public {
+        bytes32 newPriceId = keccak256("NEW_USDC/USD");
+
+        // Deploy new mock Pyth
+        MockPyth newMockPyth = new MockPyth();
+        newMockPyth.updatePrice(newPriceId, USDC_USD_PRICE, 0, -8);
+
+        vm.expectEmit(true, true, true, true);
+        emit USDCUSDOracleUpdated(
+            address(mockPyth), USDC_USD_PRICE_ID, address(newMockPyth), newPriceId
+        );
+
+        vm.prank(owner);
+        exchange.updateUSDCUSDOracle(address(newMockPyth), newPriceId);
+    }
+
+    function testUpdateUSDTOracle() public {
+        bytes32 newPriceId = keccak256("NEW_USDT/USD");
+
+        // Deploy new mock Pyth
+        MockPyth newMockPyth = new MockPyth();
+        newMockPyth.updatePrice(newPriceId, USDT_USD_PRICE, 0, -8);
+
+        vm.expectEmit(true, true, true, true);
+        emit USDTUSDOracleUpdated(
+            address(mockPyth), USDT_USD_PRICE_ID, address(newMockPyth), newPriceId
+        );
+
+        vm.prank(owner);
+        exchange.updateUSDTUSDOracle(address(newMockPyth), newPriceId);
     }
 
     function testBasicExchangeKAIA() public {
@@ -343,6 +450,18 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.updateJPYUSDRoundData(1, 68000000, block.timestamp, block.timestamp, 1);
     }
 
+    function testOnlyAdminCanUpdateOracles() public {
+        bytes32 newPriceId = keccak256("NEW_PRICE_ID");
+        MockPyth newMockPyth = new MockPyth();
+
+        vm.prank(user);
+        vm.expectRevert();
+        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+
+        vm.prank(owner);
+        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+    }
+
     function testOnlyEmergencyManagerCanPause() public {
         vm.prank(user);
         vm.expectRevert();
@@ -415,7 +534,7 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
                               ADMIN FUNCTION TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    function testEmergencyWithdrawKAIA() public {
+    function testEmergencyWithdrawETH() public {
         uint withdrawAmount = 1 ether;
 
         // Pause the contract
@@ -425,7 +544,7 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         uint balanceBefore = feeRecipient.balance;
 
         vm.prank(emergencyManager);
-        exchange.emergencyWithdrawKAIA(withdrawAmount);
+        exchange.emergencyWithdrawETH(withdrawAmount);
 
         assertEq(feeRecipient.balance, balanceBefore + withdrawAmount);
     }
@@ -496,11 +615,31 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
     }
 
     function testContractStatus() public view {
-        (uint kaiaBalance, bool isPaused, uint jpyUsdPrice) = exchange.getContractStatus();
+        (uint ethBalance, bool isPaused, uint jpyUsdPrice) = exchange.getContractStatus();
 
-        assertEq(kaiaBalance, 100 ether);
+        assertEq(ethBalance, 100 ether);
         assertFalse(isPaused);
         assertTrue(jpyUsdPrice > 0);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+                              OPTIONAL PRICE FEED TESTS
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    function testOptionalPriceFeedDeploy() public {
+        // Test deployment with optional price feeds set to bytes32(0)
+        NLPToMultiTokenKaiaExchange testExchange = new NLPToMultiTokenKaiaExchange(
+            address(nlpToken),
+            address(mockPyth),
+            KAIA_USD_PRICE_ID,
+            bytes32(0), // No USDC price feed
+            bytes32(0), // No USDT price feed
+            owner
+        );
+
+        // Verify contract deployed successfully
+        assertTrue(address(testExchange) != address(0));
+        assertEq(address(testExchange.nlpToken()), address(nlpToken));
     }
 
     receive() external payable { }
