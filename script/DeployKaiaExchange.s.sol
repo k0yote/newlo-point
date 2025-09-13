@@ -7,6 +7,34 @@ import { NLPToMultiTokenKaiaExchange } from "../src/NLPToMultiTokenKaiaExchange.
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
 
+// Mock Pyth Network contract for testing
+contract MockPyth {
+    struct PriceData {
+        int64 price;
+        uint64 conf;
+        int32 expo;
+        uint publishTime;
+    }
+
+    mapping(bytes32 => PriceData) public prices;
+
+    function updatePrice(bytes32 id, int64 price, uint64 conf, int32 expo) external {
+        prices[id] = PriceData(price, conf, expo, block.timestamp);
+    }
+
+    function getPriceUnsafe(bytes32 id) external view returns (PriceData memory) {
+        return prices[id];
+    }
+
+    function getUpdateFee(bytes[] calldata) external pure returns (uint) {
+        return 0;
+    }
+
+    function updatePriceFeeds(bytes[] calldata) external payable {
+        // Mock implementation - do nothing
+    }
+}
+
 /**
  * @title DeployKaiaExchange
  * @dev Deployment script for NLPToMultiTokenKaiaExchange contract on Kaia blockchain
@@ -25,6 +53,12 @@ contract DeployKaiaExchange is Script {
     address KAIA_NLP_TOKEN = vm.envAddress("KAIA_NLP_TOKEN"); // Replace with actual NLP token
     address KAIA_USDC_TOKEN = vm.envAddress("KAIA_USDC_TOKEN"); // Replace with actual USDC
     address KAIA_USDT_TOKEN = vm.envAddress("KAIA_USDT_TOKEN"); // Replace with actual USDT
+
+    // Pyth Network configuration
+    address KAIA_PYTH_ADDRESS = vm.envAddress("KAIA_PYTH_ADDRESS"); // Pyth Network contract address
+    bytes32 KAIA_USD_PRICE_ID = vm.envBytes32("KAIA_USD_PRICE_ID"); // KAIA/USD price ID
+    bytes32 USDC_USD_PRICE_ID = vm.envOr("USDC_USD_PRICE_ID", bytes32(0)); // USDC/USD price ID (optional)
+    bytes32 USDT_USD_PRICE_ID = vm.envOr("USDT_USD_PRICE_ID", bytes32(0)); // USDT/USD price ID (optional)
 
     // Treasury address for emergency withdrawals
     address KAIA_TREASURY = vm.envAddress("KAIA_TREASURY"); // Replace with actual treasury
@@ -47,7 +81,9 @@ contract DeployKaiaExchange is Script {
         uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        console.log("Deploying NLPToMultiTokenKaiaExchange on Kaia blockchain...");
+        console.log(
+            "Deploying NLPToMultiTokenKaiaExchange on Kaia blockchain with Pyth integration..."
+        );
         console.log("Deployer:", deployer);
 
         // Validate addresses before deployment
@@ -61,12 +97,14 @@ contract DeployKaiaExchange is Script {
         require(KAIA_USDC_TOKEN != address(0), "USDC token address cannot be zero");
         require(KAIA_USDT_TOKEN != address(0), "USDT token address cannot be zero");
         require(KAIA_TREASURY != address(0), "Treasury address cannot be zero");
+        require(KAIA_PYTH_ADDRESS != address(0), "Pyth address cannot be zero");
+        require(KAIA_USD_PRICE_ID != bytes32(0), "KAIA/USD price ID cannot be zero");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy the exchange contract
+        // Deploy the exchange contract with simplified constructor
         NLPToMultiTokenKaiaExchange exchange =
-            new NLPToMultiTokenKaiaExchange(KAIA_NLP_TOKEN, KAIA_ADMIN);
+            new NLPToMultiTokenKaiaExchange(KAIA_NLP_TOKEN, KAIA_PYTH_ADDRESS, KAIA_ADMIN);
 
         console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
@@ -82,32 +120,37 @@ contract DeployKaiaExchange is Script {
 
         console.log("Roles granted successfully");
 
-        // Configure KAIA token
+        // Configure tokens using the new configureToken function
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
             address(0), // Native KAIA
+            KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
             "KAIA"
         );
 
-        // Configure USDC token
-        exchange.configureToken(
-            NLPToMultiTokenKaiaExchange.TokenType.USDC,
-            KAIA_USDC_TOKEN,
-            6,
-            50, // 0.5% exchange fee
-            "USDC"
-        );
+        if (USDC_USD_PRICE_ID != bytes32(0)) {
+            exchange.configureToken(
+                NLPToMultiTokenKaiaExchange.TokenType.USDC,
+                KAIA_USDC_TOKEN,
+                USDC_USD_PRICE_ID,
+                6,
+                50, // 0.5% exchange fee
+                "USDC"
+            );
+        }
 
-        // Configure USDT token
-        exchange.configureToken(
-            NLPToMultiTokenKaiaExchange.TokenType.USDT,
-            KAIA_USDT_TOKEN,
-            6,
-            75, // 0.75% exchange fee
-            "USDT"
-        );
+        if (USDT_USD_PRICE_ID != bytes32(0)) {
+            exchange.configureToken(
+                NLPToMultiTokenKaiaExchange.TokenType.USDT,
+                KAIA_USDT_TOKEN,
+                USDT_USD_PRICE_ID,
+                6,
+                75, // 0.75% exchange fee
+                "USDT"
+            );
+        }
 
         console.log("Token configurations completed");
 
@@ -119,38 +162,35 @@ contract DeployKaiaExchange is Script {
             true
         );
 
-        exchange.configureOperationalFee(
-            NLPToMultiTokenKaiaExchange.TokenType.USDC,
-            25, // 0.25% operational fee
-            KAIA_FEE_RECIPIENT,
-            true
-        );
+        if (USDC_USD_PRICE_ID != bytes32(0)) {
+            exchange.configureOperationalFee(
+                NLPToMultiTokenKaiaExchange.TokenType.USDC,
+                25, // 0.25% operational fee
+                KAIA_FEE_RECIPIENT,
+                true
+            );
+        }
 
-        exchange.configureOperationalFee(
-            NLPToMultiTokenKaiaExchange.TokenType.USDT,
-            30, // 0.3% operational fee
-            KAIA_FEE_RECIPIENT,
-            true
-        );
+        if (USDT_USD_PRICE_ID != bytes32(0)) {
+            exchange.configureOperationalFee(
+                NLPToMultiTokenKaiaExchange.TokenType.USDT,
+                30, // 0.3% operational fee
+                KAIA_FEE_RECIPIENT,
+                true
+            );
+        }
 
         console.log("Operational fee configurations completed");
 
-        // Set initial external prices
-        // WARNING: These prices are for deployment only and MUST be updated immediately
+        // Set initial JPY/USD external price data
+        // WARNING: This price is for deployment only and MUST be updated immediately
         // with current market prices before enabling exchanges
-
         uint jpyUsdPrice = 0.0067e18; // 1 JPY = 0.0067 USD (example price)
-        uint kaiaUsdPrice = 0.15e18; // 1 KAIA = 0.15 USD (example price)
-        uint usdcUsdPrice = 1e18; // 1 USDC = 1 USD
-        uint usdtUsdPrice = 1e18; // 1 USDT = 1 USD
 
         // Validate price values
         require(jpyUsdPrice > 0, "JPY/USD price must be greater than zero");
-        require(kaiaUsdPrice > 0, "KAIA/USD price must be greater than zero");
-        require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
-        require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        // Convert 18 decimals to 8 decimals for Chainlink format and set external prices
+        // Set external JPY/USD price data (8 decimals format)
         exchange.updateJPYUSDRoundData(
             1, // roundId
             int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
@@ -159,31 +199,7 @@ contract DeployKaiaExchange is Script {
             1 // answeredInRound
         );
 
-        exchange.updateKAIAUSDRoundData(
-            1, // roundId
-            int(kaiaUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        exchange.updateUSDCUSDRoundData(
-            1, // roundId
-            int(usdcUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        exchange.updateUSDTUSDRoundData(
-            1, // roundId
-            int(usdtUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        console.log("Initial price data set (WARNING: Update with current prices!)");
+        console.log("Initial JPY/USD price data set (WARNING: Update with current prices!)");
 
         // Configure access control settings
         console.log("Configuring access control...");
@@ -232,35 +248,59 @@ contract DeployKaiaExchange is Script {
         console.log("USDC Token:", KAIA_USDC_TOKEN);
         console.log("USDT Token:", KAIA_USDT_TOKEN);
         console.log("========================================");
+        console.log("Pyth Network Configuration:");
+        console.log("Pyth Address:", KAIA_PYTH_ADDRESS);
+        console.log("KAIA/USD Price ID:", vm.toString(KAIA_USD_PRICE_ID));
+        if (USDC_USD_PRICE_ID != bytes32(0)) {
+            console.log("USDC/USD Price ID:", vm.toString(USDC_USD_PRICE_ID));
+        } else {
+            console.log("USDC/USD Price ID: Not configured (will be set via configureToken)");
+        }
+        if (USDT_USD_PRICE_ID != bytes32(0)) {
+            console.log("USDT/USD Price ID:", vm.toString(USDT_USD_PRICE_ID));
+        } else {
+            console.log("USDT/USD Price ID: Not configured (will be set via configureToken)");
+        }
+        console.log("========================================");
         console.log("Access Control Settings:");
         console.log("Exchange Mode:", INITIAL_EXCHANGE_MODE);
         console.log("Initial Whitelist Count:", initialWhitelist.length);
         console.log("========================================");
         console.log("Next steps:");
         console.log("1. Fund the contract with KAIA, USDC, and USDT");
-        console.log("2. Set up automated price updates using Pyth Network");
-        console.log("3. Update external price data with current market prices");
-        console.log("4. Configure monitoring and alerts");
-        console.log("5. Test exchanges with small amounts before going live");
+        console.log("2. Update JPY/USD external price data with current market prices");
+        console.log("3. Ensure Pyth Network is providing accurate price feeds");
+        console.log("4. Configure additional tokens via configureToken if needed");
+        console.log("5. Configure monitoring and alerts");
+        console.log("6. Test exchanges with small amounts before going live");
         console.log("========================================");
         console.log("IMPORTANT WARNINGS:");
-        console.log("1. Update all price feeds with current market data before enabling exchanges");
-        console.log("2. Set up regular price updates (recommended: every 5-10 minutes)");
+        console.log(
+            "1. Update JPY/USD price feed with current market data before enabling exchanges"
+        );
+        console.log("2. Verify Pyth Network price feeds are working correctly");
         console.log("3. Monitor contract balance and refill as needed");
         console.log("4. Test all functionality on testnet first");
+        console.log("5. Set up regular JPY/USD price updates if not automated");
+        console.log("6. Use updateTokenOracle to update token-specific oracles post-deployment");
     }
 }
 
 /**
  * @title DeployKaiaExchangeLocal
- * @dev Local deployment script for testing NLPToMultiTokenKaiaExchange
+ * @dev Local deployment script for testing NLPToMultiTokenKaiaExchange with mock Pyth
  */
 contract DeployKaiaExchangeLocal is Script {
+    // Pyth price IDs for local testing
+    bytes32 constant KAIA_USD_PRICE_ID = keccak256("KAIA/USD");
+    bytes32 constant USDC_USD_PRICE_ID = keccak256("USDC/USD");
+    bytes32 constant USDT_USD_PRICE_ID = keccak256("USDT/USD");
+
     function run() external {
         uint deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        console.log("Deploying NLPToMultiTokenKaiaExchange locally...");
+        console.log("Deploying NLPToMultiTokenKaiaExchange locally with mock Pyth...");
         console.log("Deployer:", deployer);
 
         vm.startBroadcast(deployerPrivateKey);
@@ -275,42 +315,54 @@ contract DeployKaiaExchangeLocal is Script {
         // Deploy mock USDT token
         ERC20DecimalsWithMint usdtToken = new ERC20DecimalsWithMint("Tether USD", "USDT", 6);
 
-        console.log("Mock tokens deployed");
+        // Deploy mock Pyth contract
+        MockPyth mockPyth = new MockPyth();
+
+        console.log("Mock tokens and Pyth deployed");
         console.log("NLP Token:", address(nlpToken));
         console.log("USDC Token:", address(usdcToken));
         console.log("USDT Token:", address(usdtToken));
+        console.log("Mock Pyth:", address(mockPyth));
 
-        // Deploy the exchange contract
+        // Set up mock Pyth prices (8 decimals format)
+        mockPyth.updatePrice(KAIA_USD_PRICE_ID, 15000000, 0, -8); // 0.15 USD
+        mockPyth.updatePrice(USDC_USD_PRICE_ID, 99971995, 0, -8); // ~1.00 USD
+        mockPyth.updatePrice(USDT_USD_PRICE_ID, 100000000, 0, -8); // 1.00 USD
+
+        console.log("Mock Pyth prices initialized");
+
+        // Deploy the exchange contract with simplified constructor
         NLPToMultiTokenKaiaExchange exchange =
-            new NLPToMultiTokenKaiaExchange(address(nlpToken), deployer);
+            new NLPToMultiTokenKaiaExchange(address(nlpToken), address(mockPyth), deployer);
 
         console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
         // Set treasury
         exchange.setTreasury(deployer);
 
-        // Configure KAIA token
+        // Configure tokens using the new configureToken function
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
             address(0), // Native KAIA
+            KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
             "KAIA"
         );
 
-        // Configure USDC token
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDC,
             address(usdcToken),
+            USDC_USD_PRICE_ID,
             6,
             50, // 0.5% exchange fee
             "USDC"
         );
 
-        // Configure USDT token
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDT,
             address(usdtToken),
+            USDT_USD_PRICE_ID,
             6,
             75, // 0.75% exchange fee
             "USDT"
@@ -342,19 +394,13 @@ contract DeployKaiaExchangeLocal is Script {
 
         console.log("Operational fee configurations completed");
 
-        // Set initial external prices for local testing
+        // Set initial JPY/USD external price for local testing
         uint jpyUsdPrice = 0.0067e18; // 1 JPY = 0.0067 USD
-        uint kaiaUsdPrice = 0.15e18; // 1 KAIA = 0.15 USD
-        uint usdcUsdPrice = 1e18; // 1 USDC = 1 USD
-        uint usdtUsdPrice = 1e18; // 1 USDT = 1 USD
 
         // Validate price values
         require(jpyUsdPrice > 0, "JPY/USD price must be greater than zero");
-        require(kaiaUsdPrice > 0, "KAIA/USD price must be greater than zero");
-        require(usdcUsdPrice > 0, "USDC/USD price must be greater than zero");
-        require(usdtUsdPrice > 0, "USDT/USD price must be greater than zero");
 
-        // Convert 18 decimals to 8 decimals for Chainlink format
+        // Set external JPY/USD price data (8 decimals format)
         exchange.updateJPYUSDRoundData(
             1, // roundId
             int(jpyUsdPrice / 10 ** 10), // answer: convert to 8 decimals
@@ -363,31 +409,7 @@ contract DeployKaiaExchangeLocal is Script {
             1 // answeredInRound
         );
 
-        exchange.updateKAIAUSDRoundData(
-            1, // roundId
-            int(kaiaUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        exchange.updateUSDCUSDRoundData(
-            1, // roundId
-            int(usdcUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        exchange.updateUSDTUSDRoundData(
-            1, // roundId
-            int(usdtUsdPrice / 10 ** 10), // answer: convert to 8 decimals
-            block.timestamp, // startedAt
-            block.timestamp, // updatedAt
-            1 // answeredInRound
-        );
-
-        console.log("Test price data set for local testing");
+        console.log("Test JPY/USD price data set for local testing");
 
         // Configure access control for local testing
         console.log("Configuring access control for local testing...");
@@ -429,7 +451,13 @@ contract DeployKaiaExchangeLocal is Script {
         console.log("NLP Token:", address(nlpToken));
         console.log("USDC Token:", address(usdcToken));
         console.log("USDT Token:", address(usdtToken));
+        console.log("Mock Pyth:", address(mockPyth));
         console.log("Admin/Owner:", deployer);
+        console.log("========================================");
+        console.log("Pyth Configuration:");
+        console.log("KAIA/USD Price ID:", vm.toString(KAIA_USD_PRICE_ID));
+        console.log("USDC/USD Price ID:", vm.toString(USDC_USD_PRICE_ID));
+        console.log("USDT/USD Price ID:", vm.toString(USDT_USD_PRICE_ID));
         console.log("========================================");
         console.log("Access Control Settings:");
         console.log("- Exchange Mode: PUBLIC");
@@ -439,8 +467,22 @@ contract DeployKaiaExchangeLocal is Script {
         console.log("2. Exchange NLP for USDC: exchange.exchangeNLP(1, amount)");
         console.log("3. Exchange NLP for USDT: exchange.exchangeNLP(2, amount)");
         console.log("========================================");
+        console.log("Test Oracle Updates (individual oracles):");
+        console.log("1. Update KAIA oracle: exchange.updateKAIAUSDOracle(newPyth, newPriceId)");
+        console.log("2. Update USDC oracle: exchange.updateUSDCUSDOracle(newPyth, newPriceId)");
+        console.log("3. Update USDT oracle: exchange.updateUSDTUSDOracle(newPyth, newPriceId)");
+        console.log("========================================");
+        console.log("Test Pyth Price Updates:");
+        console.log("1. Update KAIA price: mockPyth.updatePrice(kaiaId, newPrice, 0, -8)");
+        console.log("2. Update USDC price: mockPyth.updatePrice(usdcId, newPrice, 0, -8)");
+        console.log("3. Update USDT price: mockPyth.updatePrice(usdtId, newPrice, 0, -8)");
+        console.log("========================================");
         console.log("To test different modes:");
         console.log("1. WHITELIST mode: exchange.setExchangeMode(1)");
+        console.log("2. Configure additional tokens via: exchange.configureToken(...)");
         console.log("========================================");
+        console.log("Price Testing Commands:");
+        console.log("1. Get latest KAIA price: exchange.getLatestETHPrice()");
+        console.log("2. Get latest JPY price: exchange.getLatestJPYPrice()");
     }
 }
