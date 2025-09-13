@@ -103,14 +103,8 @@ contract DeployKaiaExchange is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy the exchange contract with simplified constructor
-        NLPToMultiTokenKaiaExchange exchange = new NLPToMultiTokenKaiaExchange(
-            KAIA_NLP_TOKEN,
-            KAIA_PYTH_ADDRESS,
-            KAIA_USD_PRICE_ID,
-            USDC_USD_PRICE_ID, // Optional - can be bytes32(0)
-            USDT_USD_PRICE_ID, // Optional - can be bytes32(0)
-            KAIA_ADMIN
-        );
+        NLPToMultiTokenKaiaExchange exchange =
+            new NLPToMultiTokenKaiaExchange(KAIA_NLP_TOKEN, KAIA_PYTH_ADDRESS, KAIA_ADMIN);
 
         console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
@@ -130,7 +124,6 @@ contract DeployKaiaExchange is Script {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
             address(0), // Native KAIA
-            KAIA_PYTH_ADDRESS,
             KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
@@ -141,7 +134,6 @@ contract DeployKaiaExchange is Script {
             exchange.configureToken(
                 NLPToMultiTokenKaiaExchange.TokenType.USDC,
                 KAIA_USDC_TOKEN,
-                KAIA_PYTH_ADDRESS,
                 USDC_USD_PRICE_ID,
                 6,
                 50, // 0.5% exchange fee
@@ -153,7 +145,6 @@ contract DeployKaiaExchange is Script {
             exchange.configureToken(
                 NLPToMultiTokenKaiaExchange.TokenType.USDT,
                 KAIA_USDT_TOKEN,
-                KAIA_PYTH_ADDRESS,
                 USDT_USD_PRICE_ID,
                 6,
                 75, // 0.75% exchange fee
@@ -291,9 +282,7 @@ contract DeployKaiaExchange is Script {
         console.log("3. Monitor contract balance and refill as needed");
         console.log("4. Test all functionality on testnet first");
         console.log("5. Set up regular JPY/USD price updates if not automated");
-        console.log(
-            "6. Use updateKAIAUSDOracle, updateUSDCUSDOracle, updateUSDTUSDOracle to update oracles post-deployment"
-        );
+        console.log("6. Use updateTokenOracle to update token-specific oracles post-deployment");
     }
 }
 
@@ -343,14 +332,8 @@ contract DeployKaiaExchangeLocal is Script {
         console.log("Mock Pyth prices initialized");
 
         // Deploy the exchange contract with simplified constructor
-        NLPToMultiTokenKaiaExchange exchange = new NLPToMultiTokenKaiaExchange(
-            address(nlpToken),
-            address(mockPyth),
-            KAIA_USD_PRICE_ID,
-            USDC_USD_PRICE_ID, // Optional - can be bytes32(0)
-            USDT_USD_PRICE_ID, // Optional - can be bytes32(0)
-            deployer
-        );
+        NLPToMultiTokenKaiaExchange exchange =
+            new NLPToMultiTokenKaiaExchange(address(nlpToken), address(mockPyth), deployer);
 
         console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
@@ -361,7 +344,6 @@ contract DeployKaiaExchangeLocal is Script {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
             address(0), // Native KAIA
-            address(mockPyth),
             KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
@@ -371,7 +353,6 @@ contract DeployKaiaExchangeLocal is Script {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDC,
             address(usdcToken),
-            address(mockPyth),
             USDC_USD_PRICE_ID,
             6,
             50, // 0.5% exchange fee
@@ -381,7 +362,6 @@ contract DeployKaiaExchangeLocal is Script {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDT,
             address(usdtToken),
-            address(mockPyth),
             USDT_USD_PRICE_ID,
             6,
             75, // 0.75% exchange fee

@@ -131,14 +131,8 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice NewLo Point token contract
     IERC20Extended public immutable nlpToken;
 
-    /// @notice Chainlink KAIA/USD price feed (always required)
-    PythAggregatorV3 public kaiaUsdPriceFeed;
-
-    /// @notice Chainlink USDC/USD price feed (updatable, address(0) if not available)
-    PythAggregatorV3 public usdcUsdPriceFeed;
-
-    /// @notice Chainlink USDT/USD price feed (updatable, address(0) if not available)
-    PythAggregatorV3 public usdtUsdPriceFeed;
+    /// @notice Pyth Network contract address
+    address public immutable pythAddress;
 
     /// @notice External JPY/USD round data (used when jpyUsdPriceFeed is address(0))
     RoundData public jpyUsdExternalRoundData;
@@ -315,34 +309,15 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @notice Initialize the multi-token exchange contract
      * @param _nlpToken NewLo Point token contract address
      * @param _pythAddress Pyth Network contract address
-     * @param _kaiaUsdPriceId Pyth price ID for KAIA/USD
-     * @param _usdcUsdPriceId Pyth price ID for USDC/USD
-     * @param _usdtUsdPriceId Pyth price ID for USDT/USD
      * @param _initialAdmin Initial admin of the contract
      */
-    constructor(
-        address _nlpToken,
-        address _pythAddress,
-        bytes32 _kaiaUsdPriceId,
-        bytes32 _usdcUsdPriceId,
-        bytes32 _usdtUsdPriceId,
-        address _initialAdmin
-    ) {
+    constructor(address _nlpToken, address _pythAddress, address _initialAdmin) {
         if (_nlpToken == address(0)) revert ZeroAddress();
         if (_pythAddress == address(0)) revert ZeroAddress();
-        if (_kaiaUsdPriceId == bytes32(0)) revert InvalidPriceId(_kaiaUsdPriceId);
         if (_initialAdmin == address(0)) revert ZeroAddress();
 
         nlpToken = IERC20Extended(_nlpToken);
-        kaiaUsdPriceFeed = new PythAggregatorV3(_pythAddress, _kaiaUsdPriceId);
-
-        if (_usdcUsdPriceId != bytes32(0)) {
-            usdcUsdPriceFeed = new PythAggregatorV3(_pythAddress, _usdcUsdPriceId);
-        }
-
-        if (_usdtUsdPriceId != bytes32(0)) {
-            usdtUsdPriceFeed = new PythAggregatorV3(_pythAddress, _usdtUsdPriceId);
-        }
+        pythAddress = _pythAddress;
 
         // Set up access control roles
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
@@ -360,8 +335,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /**
      * @notice Configure a token for exchange
      * @param tokenType Token type to configure
-     * @param tokenAddress Token contract address (address(0) for ETH)
-     * @param pythAddress Pyth Network contract address
+     * @param tokenAddress Token contract address (address(0) for KAIA)
      * @param priceId Pyth price ID
      * @param decimals Token decimals
      * @param exchangeFee Exchange fee in basis points
@@ -370,7 +344,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     function configureToken(
         TokenType tokenType,
         address tokenAddress,
-        address pythAddress,
         bytes32 priceId,
         uint8 decimals,
         uint exchangeFee,
@@ -380,23 +353,17 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             revert InvalidExchangeFee(exchangeFee, maxFee);
         }
 
-        if (pythAddress == address(0)) {
-            revert ZeroAddress();
-        }
-
         if (priceId == bytes32(0)) {
             revert InvalidPriceId(priceId);
         }
 
         tokenConfigs[tokenType] = TokenConfig({
             tokenAddress: tokenAddress,
-            priceFeed: pythAddress != address(0) && priceId != bytes32(0)
-                ? new PythAggregatorV3(pythAddress, priceId)
-                : new PythAggregatorV3(address(0), bytes32(0)),
+            priceFeed: new PythAggregatorV3(pythAddress, priceId),
             decimals: decimals,
             exchangeFee: exchangeFee,
             isEnabled: true,
-            hasOracle: pythAddress != address(0) && priceId != bytes32(0),
+            hasOracle: true,
             symbol: symbol
         });
 
@@ -569,12 +536,13 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Update USDC/USD oracle address
+     * @notice Update token oracle price feed
+     * @param tokenType Token type to update
      * @param newPythAddress New Pyth Network contract address
-     * @param newKaiaUsdPriceId New KAIA/USD price ID
-     * @dev This allows updating the USDC/USD oracle address
+     * @param newPriceId New price ID
+     * @dev This allows updating the oracle for any configured token
      */
-    function updateKAIAUSDOracle(address newPythAddress, bytes32 newKaiaUsdPriceId)
+    function updateTokenOracle(TokenType tokenType, address newPythAddress, bytes32 newPriceId)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
@@ -582,63 +550,27 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             revert ZeroAddress();
         }
 
-        if (newKaiaUsdPriceId == bytes32(0)) {
-            revert InvalidPriceId(newKaiaUsdPriceId);
+        if (newPriceId == bytes32(0)) {
+            revert InvalidPriceId(newPriceId);
         }
 
-        address oldOracle = address(kaiaUsdPriceFeed.pyth());
-        bytes32 oldPriceId = kaiaUsdPriceFeed.priceId();
-        kaiaUsdPriceFeed = new PythAggregatorV3(newPythAddress, newKaiaUsdPriceId);
-        emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newKaiaUsdPriceId);
-    }
-
-    /**
-     * @notice Update USDC/USD oracle address
-     * @param newPythAddress New Pyth Network contract address
-     * @param newUsdcUsdPriceId New USDC/USD price ID
-     * @dev This allows updating the USDC/USD oracle address
-     */
-    function updateUSDCUSDOracle(address newPythAddress, bytes32 newUsdcUsdPriceId)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        if (newPythAddress == address(0)) {
-            revert ZeroAddress();
+        TokenConfig storage config = tokenConfigs[tokenType];
+        if (!config.hasOracle) {
+            revert InvalidTokenConfig();
         }
 
-        if (newUsdcUsdPriceId == bytes32(0)) {
-            revert InvalidPriceId(newUsdcUsdPriceId);
+        address oldOracle = address(config.priceFeed.pyth());
+        bytes32 oldPriceId = config.priceFeed.priceId();
+        config.priceFeed = new PythAggregatorV3(newPythAddress, newPriceId);
+
+        // Emit specific events based on token type for backward compatibility
+        if (tokenType == TokenType.KAIA) {
+            emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
+        } else if (tokenType == TokenType.USDC) {
+            emit USDCUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
+        } else if (tokenType == TokenType.USDT) {
+            emit USDTUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
         }
-
-        address oldOracle = address(usdcUsdPriceFeed.pyth());
-        bytes32 oldPriceId = usdcUsdPriceFeed.priceId();
-        usdcUsdPriceFeed = new PythAggregatorV3(newPythAddress, newUsdcUsdPriceId);
-        emit USDCUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newUsdcUsdPriceId);
-    }
-
-    /**
-     * @notice Update USDT/USD oracle address
-     * @param newPythAddress New Pyth Network contract address
-     * @param newUsdtUsdPriceId New USDT/USD price ID
-     * @dev This allows updating the USDT/USD oracle address
-     */
-    function updateUSDTUSDOracle(address newPythAddress, bytes32 newUsdtUsdPriceId)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        if (newPythAddress == address(0)) {
-            revert ZeroAddress();
-        }
-
-        if (newUsdtUsdPriceId == bytes32(0)) {
-            revert InvalidPriceId(newUsdtUsdPriceId);
-        }
-
-        address oldOracle = address(usdtUsdPriceFeed.pyth());
-
-        bytes32 oldPriceId = usdtUsdPriceFeed.priceId();
-        usdtUsdPriceFeed = new PythAggregatorV3(newPythAddress, newUsdtUsdPriceId);
-        emit USDTUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newUsdtUsdPriceId);
     }
 
     /**
@@ -1163,20 +1095,13 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @return price Token price in USD (18 decimals)
      */
     function _getTokenPrice(TokenType tokenType) internal view returns (uint price) {
-        // Efficient conditional logic to reduce gas
-        if (tokenType == TokenType.KAIA) {
-            return _getOraclePriceInternal(address(kaiaUsdPriceFeed));
-        } else if (tokenType == TokenType.USDC) {
-            if (address(usdcUsdPriceFeed) != address(0)) {
-                return _getOraclePriceInternal(address(usdcUsdPriceFeed));
-            }
-        } else if (tokenType == TokenType.USDT) {
-            if (address(usdtUsdPriceFeed) != address(0)) {
-                return _getOraclePriceInternal(address(usdtUsdPriceFeed));
-            }
+        TokenConfig memory config = tokenConfigs[tokenType];
+
+        if (!config.hasOracle || address(config.priceFeed) == address(0)) {
+            revert NoPriceDataAvailable(tokenType);
         }
 
-        revert NoPriceDataAvailable(tokenType);
+        return _getOraclePriceInternal(address(config.priceFeed));
     }
 
     /**
@@ -1397,12 +1322,25 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Get latest ETH/USD price from dedicated oracle
+     * @notice Get latest KAIA/USD price from dedicated oracle
+     * @return price KAIA/USD price (18 decimals)
+     * @dev This function always uses the configured KAIA/USD oracle
+     */
+    function getLatestKAIAPrice() external view returns (uint price) {
+        TokenConfig memory config = tokenConfigs[TokenType.KAIA];
+        if (!config.hasOracle || address(config.priceFeed) == address(0)) {
+            revert NoPriceDataAvailable(TokenType.KAIA);
+        }
+        return this.getOraclePrice(address(config.priceFeed), 18);
+    }
+
+    /**
+     * @notice Get latest ETH/USD price from dedicated oracle (alias for KAIA price)
      * @return price ETH/USD price (18 decimals)
-     * @dev This function always uses the dedicated ETH/USD oracle
+     * @dev This function is kept for backward compatibility and uses KAIA oracle
      */
     function getLatestETHPrice() external view returns (uint price) {
-        return this.getOraclePrice(address(kaiaUsdPriceFeed), 18);
+        return this.getLatestKAIAPrice();
     }
 
     /**

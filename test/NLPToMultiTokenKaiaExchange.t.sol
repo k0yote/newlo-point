@@ -181,14 +181,7 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         mockPyth.updatePrice(USDT_USD_PRICE_ID, USDT_USD_PRICE, 0, -8);
 
         // Deploy exchange contract with simplified constructor
-        exchange = new NLPToMultiTokenKaiaExchange(
-            address(nlpToken),
-            address(mockPyth),
-            KAIA_USD_PRICE_ID,
-            USDC_USD_PRICE_ID, // Optional - can be bytes32(0)
-            USDT_USD_PRICE_ID, // Optional - can be bytes32(0)
-            owner
-        );
+        exchange = new NLPToMultiTokenKaiaExchange(address(nlpToken), address(mockPyth), owner);
 
         console.log("NLPToMultiTokenKaiaExchange deployed at:", address(exchange));
 
@@ -206,7 +199,6 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.KAIA,
             address(0), // Native KAIA
-            address(mockPyth),
             KAIA_USD_PRICE_ID,
             18,
             100, // 1% exchange fee
@@ -216,7 +208,6 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDC,
             address(usdcToken),
-            address(mockPyth),
             USDC_USD_PRICE_ID,
             6,
             50, // 0.5% exchange fee
@@ -226,7 +217,6 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.configureToken(
             NLPToMultiTokenKaiaExchange.TokenType.USDT,
             address(usdtToken),
-            address(mockPyth),
             USDT_USD_PRICE_ID,
             6,
             75, // 0.75% exchange fee
@@ -324,7 +314,7 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
 
     function testUpdateKAIAOracle() public {
         bytes32 newPriceId = keccak256("NEW_KAIA/USD");
-        address newPythAddress = address(0x999);
+        // address newPythAddress = address(0x999);
 
         // Deploy new mock Pyth
         MockPyth newMockPyth = new MockPyth();
@@ -336,7 +326,9 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         );
 
         vm.prank(owner);
-        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+        exchange.updateTokenOracle(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        );
     }
 
     function testUpdateUSDCOracle() public {
@@ -352,7 +344,9 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         );
 
         vm.prank(owner);
-        exchange.updateUSDCUSDOracle(address(newMockPyth), newPriceId);
+        exchange.updateTokenOracle(
+            NLPToMultiTokenKaiaExchange.TokenType.USDC, address(newMockPyth), newPriceId
+        );
     }
 
     function testUpdateUSDTOracle() public {
@@ -368,7 +362,9 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         );
 
         vm.prank(owner);
-        exchange.updateUSDTUSDOracle(address(newMockPyth), newPriceId);
+        exchange.updateTokenOracle(
+            NLPToMultiTokenKaiaExchange.TokenType.USDT, address(newMockPyth), newPriceId
+        );
     }
 
     function testBasicExchangeKAIA() public {
@@ -456,10 +452,14 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
 
         vm.prank(user);
         vm.expectRevert();
-        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+        exchange.updateTokenOracle(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        );
 
         vm.prank(owner);
-        exchange.updateKAIAUSDOracle(address(newMockPyth), newPriceId);
+        exchange.updateTokenOracle(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        );
     }
 
     function testOnlyEmergencyManagerCanPause() public {
@@ -627,14 +627,19 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
     ═══════════════════════════════════════════════════════════════════════ */
 
     function testOptionalPriceFeedDeploy() public {
-        // Test deployment with optional price feeds set to bytes32(0)
-        NLPToMultiTokenKaiaExchange testExchange = new NLPToMultiTokenKaiaExchange(
-            address(nlpToken),
-            address(mockPyth),
+        // Test deployment with simplified constructor
+        NLPToMultiTokenKaiaExchange testExchange =
+            new NLPToMultiTokenKaiaExchange(address(nlpToken), address(mockPyth), owner);
+
+        // Configure only KAIA token (no USDC/USDT)
+        vm.prank(owner);
+        testExchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            address(0), // Native KAIA
             KAIA_USD_PRICE_ID,
-            bytes32(0), // No USDC price feed
-            bytes32(0), // No USDT price feed
-            owner
+            18,
+            100, // 1% exchange fee
+            "KAIA"
         );
 
         // Verify contract deployed successfully
