@@ -282,7 +282,9 @@ contract DeployKaiaExchange is Script {
         console.log("3. Monitor contract balance and refill as needed");
         console.log("4. Test all functionality on testnet first");
         console.log("5. Set up regular JPY/USD price updates if not automated");
-        console.log("6. Use updateTokenOracle to update token-specific oracles post-deployment");
+        console.log(
+            "6. Use configureToken to update token configurations and oracles post-deployment"
+        );
     }
 }
 

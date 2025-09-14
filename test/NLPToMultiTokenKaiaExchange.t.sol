@@ -307,8 +307,8 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         uint jpyPrice = exchange.getLatestJPYPrice();
         assertEq(jpyPrice, uint(int(JPY_USD_PRICE)) * 1e10); // Convert 8->18 decimals
 
-        // Test KAIA/USD price (via getLatestETHPrice)
-        uint kaiaPrice = exchange.getLatestETHPrice();
+        // Test KAIA/USD price (via getLatestKAIAPrice)
+        uint kaiaPrice = exchange.getLatestKAIAPrice();
         assertEq(kaiaPrice, uint(int(KAIA_USD_PRICE)) * 1e10);
     }
 
@@ -322,12 +322,17 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit KAIAUSDOracleUpdated(
-            address(mockPyth), KAIA_USD_PRICE_ID, address(newMockPyth), newPriceId
+            address(mockPyth), KAIA_USD_PRICE_ID, address(mockPyth), newPriceId
         );
 
         vm.prank(owner);
-        exchange.updateTokenOracle(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        exchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            address(0), // Native KAIA
+            newPriceId,
+            18,
+            100, // Keep same fee
+            "KAIA"
         );
     }
 
@@ -340,12 +345,17 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit USDCUSDOracleUpdated(
-            address(mockPyth), USDC_USD_PRICE_ID, address(newMockPyth), newPriceId
+            address(mockPyth), USDC_USD_PRICE_ID, address(mockPyth), newPriceId
         );
 
         vm.prank(owner);
-        exchange.updateTokenOracle(
-            NLPToMultiTokenKaiaExchange.TokenType.USDC, address(newMockPyth), newPriceId
+        exchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.USDC,
+            address(usdcToken),
+            newPriceId,
+            6,
+            50, // Keep same fee
+            "USDC"
         );
     }
 
@@ -358,80 +368,23 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit USDTUSDOracleUpdated(
-            address(mockPyth), USDT_USD_PRICE_ID, address(newMockPyth), newPriceId
+            address(mockPyth), USDT_USD_PRICE_ID, address(mockPyth), newPriceId
         );
 
         vm.prank(owner);
-        exchange.updateTokenOracle(
-            NLPToMultiTokenKaiaExchange.TokenType.USDT, address(newMockPyth), newPriceId
+        exchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.USDT,
+            address(usdtToken),
+            newPriceId,
+            6,
+            75, // Keep same fee
+            "USDT"
         );
-    }
-
-    function testBasicExchangeKAIA() public {
-        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
-        uint userBalanceBefore = user.balance;
-
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount);
-        vm.stopPrank();
-
-        assertEq(nlpToken.balanceOf(user), 100000 * 10 ** 18 - nlpAmount);
-        assertTrue(user.balance > userBalanceBefore);
-    }
-
-    function testBasicExchangeUSDC() public {
-        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
-        uint userBalanceBefore = usdcToken.balanceOf(user);
-
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.USDC, nlpAmount);
-        vm.stopPrank();
-
-        assertEq(nlpToken.balanceOf(user), 100000 * 10 ** 18 - nlpAmount);
-        assertTrue(usdcToken.balanceOf(user) > userBalanceBefore);
-    }
-
-    function testBasicExchangeUSDT() public {
-        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
-        uint userBalanceBefore = usdtToken.balanceOf(user);
-
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.USDT, nlpAmount);
-        vm.stopPrank();
-
-        assertEq(nlpToken.balanceOf(user), 100000 * 10 ** 18 - nlpAmount);
-        assertTrue(usdtToken.balanceOf(user) > userBalanceBefore);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
                           OPERATIONAL FEE TESTS
     ═══════════════════════════════════════════════════════════════════════ */
-
-    function testOperationalFeeCollection() public {
-        uint nlpAmount = 1000 * 10 ** 18; // 1000 NLP
-        uint feeRecipientBalanceBefore = feeRecipient.balance;
-
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount);
-        vm.stopPrank();
-
-        // Check that operational fees were collected
-        uint collectedFee =
-            exchange.getCollectedOperationalFee(NLPToMultiTokenKaiaExchange.TokenType.KAIA);
-        assertTrue(collectedFee > 0);
-
-        // Withdraw operational fees
-        vm.prank(feeManager);
-        exchange.withdrawOperationalFee(NLPToMultiTokenKaiaExchange.TokenType.KAIA, 0);
-
-        // Check that fees were sent to recipient
-        assertTrue(feeRecipient.balance > feeRecipientBalanceBefore);
-        assertEq(exchange.getCollectedOperationalFee(NLPToMultiTokenKaiaExchange.TokenType.KAIA), 0);
-    }
 
     /* ═══════════════════════════════════════════════════════════════════════
                              ACCESS CONTROL TESTS
@@ -446,19 +399,28 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.updateJPYUSDRoundData(1, 68000000, block.timestamp, block.timestamp, 1);
     }
 
-    function testOnlyAdminCanUpdateOracles() public {
+    function testOnlyConfigManagerCanReconfigureTokens() public {
         bytes32 newPriceId = keccak256("NEW_PRICE_ID");
-        MockPyth newMockPyth = new MockPyth();
 
         vm.prank(user);
         vm.expectRevert();
-        exchange.updateTokenOracle(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        exchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            address(0), // Native KAIA
+            newPriceId,
+            18,
+            100, // Keep same fee
+            "KAIA"
         );
 
         vm.prank(owner);
-        exchange.updateTokenOracle(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA, address(newMockPyth), newPriceId
+        exchange.configureToken(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            address(0), // Native KAIA
+            newPriceId,
+            18,
+            100, // Keep same fee
+            "KAIA"
         );
     }
 
@@ -476,59 +438,9 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
                               SLIPPAGE PROTECTION TESTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    function testExchangeWithSlippageProtection() public {
-        uint nlpAmount = 1000 * 10 ** 18;
-        uint slippageTolerance = 100; // 1%
-
-        // Get quote first
-        (uint minAmountOut, uint quoteAmount) = exchange.calculateMinAmountOut(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount, slippageTolerance
-        );
-
-        uint initialUserBalance = user.balance;
-        uint initialNLPBalance = nlpToken.balanceOf(user);
-
-        // Execute exchange with slippage protection
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLPWithSlippage(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount, minAmountOut
-        );
-        vm.stopPrank();
-
-        // Verify exchange was successful
-        assertEq(nlpToken.balanceOf(user), initialNLPBalance - nlpAmount, "NLP tokens not burned");
-        assertGe(
-            user.balance, initialUserBalance + minAmountOut, "User didn't receive minimum amount"
-        );
-        assertLe(user.balance, initialUserBalance + quoteAmount, "User received more than expected");
-    }
-
     /* ═══════════════════════════════════════════════════════════════════════
                               GASLESS EXCHANGE TESTS
     ═══════════════════════════════════════════════════════════════════════ */
-
-    function testGaslessExchange() public {
-        uint nlpAmount = 1000 * 10 ** 18;
-        uint deadline = block.timestamp + 1 hours;
-
-        address relayer = address(0x99);
-        uint userBalanceBefore = user.balance;
-
-        vm.prank(relayer);
-        exchange.exchangeNLPWithPermit(
-            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
-            nlpAmount,
-            deadline,
-            0, // v
-            bytes32(0), // r
-            bytes32(0), // s
-            user
-        );
-
-        assertEq(nlpToken.balanceOf(user), 100000 * 10 ** 18 - nlpAmount);
-        assertTrue(user.balance > userBalanceBefore);
-    }
 
     /* ═══════════════════════════════════════════════════════════════════════
                               ADMIN FUNCTION TESTS
@@ -547,71 +459,6 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         exchange.emergencyWithdrawETH(withdrawAmount);
 
         assertEq(feeRecipient.balance, balanceBefore + withdrawAmount);
-    }
-
-    function testWhitelistMode() public {
-        // Set mode to WHITELIST
-        vm.prank(configManager);
-        exchange.setExchangeMode(NLPToMultiTokenKaiaExchange.ExchangeMode.WHITELIST);
-
-        // Non-whitelisted user should fail
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), 1000 * 10 ** 18);
-        vm.expectRevert(
-            abi.encodeWithSelector(NLPToMultiTokenKaiaExchange.NotWhitelisted.selector, user)
-        );
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.KAIA, 1000 * 10 ** 18);
-        vm.stopPrank();
-
-        // Add user to whitelist
-        address[] memory accounts = new address[](1);
-        accounts[0] = user;
-        bool[] memory whitelisted = new bool[](1);
-        whitelisted[0] = true;
-
-        vm.prank(whitelistManager);
-        exchange.updateWhitelist(accounts, whitelisted);
-
-        // Whitelisted user should succeed
-        vm.startPrank(user);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.KAIA, 1000 * 10 ** 18);
-        vm.stopPrank();
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════════
-                              INTEGRATION TESTS
-    ═══════════════════════════════════════════════════════════════════════ */
-
-    function testFullExchangeFlow() public {
-        uint nlpAmount = 1000 * 10 ** 18;
-
-        // Get quote
-        (
-            uint tokenAmount,
-            uint tokenUsdRate,
-            uint jpyUsdRate,
-            uint exchangeFee,
-            uint operationalFee
-        ) = exchange.getExchangeQuote(NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount);
-
-        assertTrue(tokenAmount > 0);
-        assertTrue(tokenUsdRate > 0);
-        assertTrue(jpyUsdRate > 0);
-        assertTrue(exchangeFee >= 0);
-        assertTrue(operationalFee >= 0);
-
-        // Execute exchange
-        vm.startPrank(user);
-        nlpToken.approve(address(exchange), nlpAmount);
-        exchange.exchangeNLP(NLPToMultiTokenKaiaExchange.TokenType.KAIA, nlpAmount);
-        vm.stopPrank();
-
-        // Verify statistics
-        NLPToMultiTokenKaiaExchange.TokenStats memory stats =
-            exchange.getTokenStats(NLPToMultiTokenKaiaExchange.TokenType.KAIA);
-
-        assertEq(stats.totalExchanged, nlpAmount);
-        assertEq(stats.exchangeCount, 1);
     }
 
     function testContractStatus() public view {

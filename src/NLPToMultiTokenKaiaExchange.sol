@@ -274,14 +274,11 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     error InsufficientBalance(TokenType tokenType, uint required, uint available);
-    error InvalidExchangeAmount(uint amount);
     error PriceDataStale(uint updatedAt, uint threshold);
     error InvalidPriceData(int price);
     error ExchangeFailed(address user, uint nlpAmount);
     error InvalidExchangeFee(uint fee, uint maxFee);
     error InvalidOperationalFee(uint fee, uint maxFee);
-    error InvalidUser(address user);
-    error PermitFailed(address user, uint nlpAmount, uint deadline);
     error TokenNotEnabled(TokenType tokenType);
     error NoPriceDataAvailable(TokenType tokenType);
     error InvalidFeeRecipient(address recipient);
@@ -357,6 +354,16 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             revert InvalidPriceId(priceId);
         }
 
+        // Store old oracle information for events (if token was previously configured)
+        address oldOracle = address(0);
+        bytes32 oldPriceId = bytes32(0);
+        bool wasConfigured = tokenConfigs[tokenType].hasOracle;
+
+        if (wasConfigured) {
+            oldOracle = address(tokenConfigs[tokenType].priceFeed.pyth());
+            oldPriceId = tokenConfigs[tokenType].priceFeed.priceId();
+        }
+
         tokenConfigs[tokenType] = TokenConfig({
             tokenAddress: tokenAddress,
             priceFeed: new PythAggregatorV3(pythAddress, priceId),
@@ -368,6 +375,17 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         });
 
         emit TokenConfigUpdated(tokenType, tokenAddress, exchangeFee, true);
+
+        // Emit oracle-specific events for backward compatibility when updating existing tokens
+        if (wasConfigured) {
+            if (tokenType == TokenType.KAIA) {
+                emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
+            } else if (tokenType == TokenType.USDC) {
+                emit USDCUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
+            } else if (tokenType == TokenType.USDT) {
+                emit USDTUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
+            }
+        }
     }
 
     /**
@@ -533,44 +551,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         });
 
         emit JPYUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
-    }
-
-    /**
-     * @notice Update token oracle price feed
-     * @param tokenType Token type to update
-     * @param newPythAddress New Pyth Network contract address
-     * @param newPriceId New price ID
-     * @dev This allows updating the oracle for any configured token
-     */
-    function updateTokenOracle(TokenType tokenType, address newPythAddress, bytes32 newPriceId)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        if (newPythAddress == address(0)) {
-            revert ZeroAddress();
-        }
-
-        if (newPriceId == bytes32(0)) {
-            revert InvalidPriceId(newPriceId);
-        }
-
-        TokenConfig storage config = tokenConfigs[tokenType];
-        if (!config.hasOracle) {
-            revert InvalidTokenConfig();
-        }
-
-        address oldOracle = address(config.priceFeed.pyth());
-        bytes32 oldPriceId = config.priceFeed.priceId();
-        config.priceFeed = new PythAggregatorV3(newPythAddress, newPriceId);
-
-        // Emit specific events based on token type for backward compatibility
-        if (tokenType == TokenType.KAIA) {
-            emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
-        } else if (tokenType == TokenType.USDC) {
-            emit USDCUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
-        } else if (tokenType == TokenType.USDT) {
-            emit USDTUSDOracleUpdated(oldOracle, oldPriceId, newPythAddress, newPriceId);
-        }
     }
 
     /**
@@ -942,149 +922,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         );
     }
 
-    /**
-     * @notice Exchange NLP tokens for specified token (legacy function without slippage protection)
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithSlippage for better protection.
-     */
-    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        // Check exchange permission
-        _checkExchangePermission(msg.sender);
-
-        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), 0);
-    }
-
-    /**
-     * @notice Exchange NLP tokens for specified token with slippage protection
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
-     */
-    function exchangeNLPWithSlippage(TokenType tokenType, uint nlpAmount, uint minAmountOut)
-        external
-        nonReentrant
-        whenNotPaused
-    {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        // Check exchange permission
-        _checkExchangePermission(msg.sender);
-
-        _executeExchange(tokenType, nlpAmount, msg.sender, address(0), minAmountOut);
-    }
-
-    /**
-     * @notice Exchange NLP tokens using permit (legacy function without slippage protection)
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param deadline Permit deadline
-     * @param v ECDSA signature parameter
-     * @param r ECDSA signature parameter
-     * @param s ECDSA signature parameter
-     * @param user User address (token owner)
-     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithPermitAndSlippage for better protection.
-     */
-    function exchangeNLPWithPermit(
-        TokenType tokenType,
-        uint nlpAmount,
-        uint deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s,
-        address user
-    ) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        if (user == address(0)) {
-            revert InvalidUser(user);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        // Check exchange permission for relayer (operator)
-        _checkExchangePermission(msg.sender);
-
-        // Execute permit
-        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
-            revert PermitFailed(user, nlpAmount, deadline);
-        }
-
-        // Execute exchange
-        _executeExchange(tokenType, nlpAmount, user, msg.sender, 0);
-    }
-
-    /**
-     * @notice Exchange NLP tokens using permit with slippage protection
-     * @param tokenType Type of token to receive
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param minAmountOut Minimum amount of tokens to receive (slippage protection)
-     * @param deadline Permit deadline
-     * @param v ECDSA signature parameter
-     * @param r ECDSA signature parameter
-     * @param s ECDSA signature parameter
-     * @param user User address (token owner)
-     */
-    function exchangeNLPWithPermitAndSlippage(
-        TokenType tokenType,
-        uint nlpAmount,
-        uint minAmountOut,
-        uint deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s,
-        address user
-    ) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) {
-            revert InvalidExchangeAmount(nlpAmount);
-        }
-
-        if (user == address(0)) {
-            revert InvalidUser(user);
-        }
-
-        TokenConfig memory config = tokenConfigs[tokenType];
-        if (!config.isEnabled) {
-            revert TokenNotEnabled(tokenType);
-        }
-
-        // Check exchange permission for relayer (operator)
-        _checkExchangePermission(msg.sender);
-
-        // Execute permit
-        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
-            revert PermitFailed(user, nlpAmount, deadline);
-        }
-
-        // Execute exchange
-        _executeExchange(tokenType, nlpAmount, user, msg.sender, minAmountOut);
-    }
-
     /* ═══════════════════════════════════════════════════════════════════════
                               PRICE FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -1335,15 +1172,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Get latest ETH/USD price from dedicated oracle (alias for KAIA price)
-     * @return price ETH/USD price (18 decimals)
-     * @dev This function is kept for backward compatibility and uses KAIA oracle
-     */
-    function getLatestETHPrice() external view returns (uint price) {
-        return this.getLatestKAIAPrice();
-    }
-
-    /**
      * @notice Get latest JPY/USD price from oracle or external data
      * @return price JPY/USD price (18 decimals)
      * @dev This function uses oracle if available, otherwise external round data
@@ -1376,98 +1204,6 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      */
     function calculateJPYAmount(uint nlpAmount) external view returns (uint jpyAmount) {
         return Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
-    }
-
-    /**
-     * @notice Calculate minimum amount out with slippage tolerance
-     * @param tokenType Token type to get quote for
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
-     * @return minAmountOut Minimum amount out considering slippage
-     * @return quoteAmount Expected amount without slippage
-     * @dev Use this function to calculate minAmountOut for slippage-protected exchanges
-     */
-    function calculateMinAmountOut(TokenType tokenType, uint nlpAmount, uint slippageToleranceBps)
-        external
-        view
-        returns (uint minAmountOut, uint quoteAmount)
-    {
-        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
-
-        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
-            return (0, 0);
-        }
-
-        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
-            try this._calculateTokenAmounts(
-                tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
-                quoteAmount = amountResult.tokenAmount;
-                // Calculate minimum amount considering slippage
-                minAmountOut = (quoteAmount * (10000 - slippageToleranceBps)) / 10000;
-            } catch {
-                return (0, 0);
-            }
-        } catch {
-            return (0, 0);
-        }
-    }
-
-    /**
-     * @notice Get exchange quote with slippage calculation
-     * @param tokenType Token type to get quote for
-     * @param nlpAmount Amount of NLP tokens to exchange
-     * @param slippageToleranceBps Slippage tolerance in basis points (e.g., 100 = 1%)
-     * @return tokenAmount Amount of tokens that would be received
-     * @return tokenUsdRate Token/USD price used
-     * @return jpyUsdRate JPY/USD price used
-     * @return exchangeFee Exchange fee amount in tokens
-     * @return operationalFee Operational fee amount in tokens
-     * @return minAmountOut Minimum amount out considering slippage
-     * @return maxSlippageAmount Maximum possible slippage amount
-     */
-    function getExchangeQuoteWithSlippage(
-        TokenType tokenType,
-        uint nlpAmount,
-        uint slippageToleranceBps
-    )
-        external
-        view
-        returns (
-            uint tokenAmount,
-            uint tokenUsdRate,
-            uint jpyUsdRate,
-            uint exchangeFee,
-            uint operationalFee,
-            uint minAmountOut,
-            uint maxSlippageAmount
-        )
-    {
-        require(slippageToleranceBps <= 10000, "Slippage tolerance too high");
-
-        if (nlpAmount == 0 || !tokenConfigs[tokenType].isEnabled) {
-            return (0, 0, 0, 0, 0, 0, 0);
-        }
-
-        try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
-            try this._calculateTokenAmounts(
-                tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
-                tokenAmount = amountResult.tokenAmount;
-                tokenUsdRate = priceResult.tokenUsdPrice;
-                jpyUsdRate = priceResult.jpyUsdPrice;
-                exchangeFee = amountResult.exchangeFee;
-                operationalFee = amountResult.operationalFee;
-
-                // Calculate slippage protection values
-                minAmountOut = (tokenAmount * (10000 - slippageToleranceBps)) / 10000;
-                maxSlippageAmount = tokenAmount - minAmountOut;
-            } catch {
-                return (0, 0, 0, 0, 0, 0, 0);
-            }
-        } catch {
-            return (0, 0, 0, 0, 0, 0, 0);
-        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
