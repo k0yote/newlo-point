@@ -465,9 +465,15 @@ contract DeployKaiaExchangeLocal is Script {
         console.log("- Exchange Mode: PUBLIC");
         console.log("========================================");
         console.log("Test Exchange Examples:");
-        console.log("1. Exchange NLP for KAIA: exchange.exchangeNLP(0, amount)");
-        console.log("2. Exchange NLP for USDC: exchange.exchangeNLP(1, amount)");
-        console.log("3. Exchange NLP for USDT: exchange.exchangeNLP(2, amount)");
+        console.log(
+            "1. Exchange NLP for KAIA using permit: exchange.exchangeNLPWithPermit(0, amount, deadline, v, r, s, user)"
+        );
+        console.log(
+            "2. Exchange NLP for USDC using permit: exchange.exchangeNLPWithPermit(1, amount, deadline, v, r, s, user)"
+        );
+        console.log(
+            "3. Exchange NLP for USDT using permit: exchange.exchangeNLPWithPermit(2, amount, deadline, v, r, s, user)"
+        );
         console.log("========================================");
         console.log("Test Oracle Updates (individual oracles):");
         console.log("1. Update KAIA oracle: exchange.updateKAIAUSDOracle(newPyth, newPriceId)");

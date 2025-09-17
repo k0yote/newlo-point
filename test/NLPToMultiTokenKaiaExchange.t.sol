@@ -166,6 +166,18 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
         uint operationalFee
     );
 
+    event GaslessExchangeExecuted(
+        address indexed user,
+        address indexed relayer,
+        NLPToMultiTokenKaiaExchange.TokenType indexed tokenType,
+        uint nlpAmount,
+        uint tokenAmount,
+        uint tokenUsdRate,
+        uint jpyUsdRate,
+        uint exchangeFee,
+        uint operationalFee
+    );
+
     function setUp() public {
         vm.startPrank(owner);
 
@@ -441,6 +453,276 @@ contract NLPToMultiTokenKaiaExchangeTest is Test {
     /* ═══════════════════════════════════════════════════════════════════════
                               GASLESS EXCHANGE TESTS
     ═══════════════════════════════════════════════════════════════════════ */
+
+    function testExchangeNLPWithPermitKAIA() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Get initial balances
+        uint userNLPBalanceBefore = nlpToken.balanceOf(user);
+        uint userKAIABalanceBefore = user.balance;
+        uint contractKAIABalanceBefore = address(exchange).balance;
+
+        // Set up permit allowance for testing
+        vm.prank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        // Execute gasless exchange via relayer
+        vm.prank(relayer);
+        vm.expectEmit(true, true, true, false);
+        emit GaslessExchangeExecuted(
+            user,
+            relayer,
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            0, // tokenAmount - we don't check exact amount
+            0, // tokenUsdRate - we don't check exact rate
+            0, // jpyUsdRate - we don't check exact rate
+            0, // exchangeFee - we don't check exact fee
+            0 // operationalFee - we don't check exact fee
+        );
+
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+
+        // Verify NLP tokens were burned
+        assertEq(nlpToken.balanceOf(user), userNLPBalanceBefore - nlpAmount);
+
+        // Verify user received KAIA (should be > 0)
+        assertTrue(user.balance > userKAIABalanceBefore);
+
+        // Verify contract KAIA balance decreased
+        assertTrue(address(exchange).balance < contractKAIABalanceBefore);
+    }
+
+    function testExchangeNLPWithPermitUSDC() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Get initial balances
+        uint userNLPBalanceBefore = nlpToken.balanceOf(user);
+        uint userUSDCBalanceBefore = usdcToken.balanceOf(user);
+        uint contractUSDCBalanceBefore = usdcToken.balanceOf(address(exchange));
+
+        // Set up permit allowance for testing
+        vm.prank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        // Execute gasless exchange via relayer
+        vm.prank(relayer);
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.USDC,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+
+        // Verify NLP tokens were burned
+        assertEq(nlpToken.balanceOf(user), userNLPBalanceBefore - nlpAmount);
+
+        // Verify user received USDC (should be > 0)
+        assertTrue(usdcToken.balanceOf(user) > userUSDCBalanceBefore);
+
+        // Verify contract USDC balance decreased
+        assertTrue(usdcToken.balanceOf(address(exchange)) < contractUSDCBalanceBefore);
+    }
+
+    function testExchangeNLPWithPermitUSDT() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Get initial balances
+        uint userNLPBalanceBefore = nlpToken.balanceOf(user);
+        uint userUSDTBalanceBefore = usdtToken.balanceOf(user);
+        uint contractUSDTBalanceBefore = usdtToken.balanceOf(address(exchange));
+
+        // Set up permit allowance for testing
+        vm.prank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        // Execute gasless exchange via relayer
+        vm.prank(relayer);
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.USDT,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+
+        // Verify NLP tokens were burned
+        assertEq(nlpToken.balanceOf(user), userNLPBalanceBefore - nlpAmount);
+
+        // Verify user received USDT (should be > 0)
+        assertTrue(usdtToken.balanceOf(user) > userUSDTBalanceBefore);
+
+        // Verify contract USDT balance decreased
+        assertTrue(usdtToken.balanceOf(address(exchange)) < contractUSDTBalanceBefore);
+    }
+
+    function testExchangeNLPWithPermitFailsWithZeroAmount() public {
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        vm.prank(relayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenKaiaExchange.InvalidExchangeAmount.selector, 0)
+        );
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            0, // Zero amount should fail
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+    }
+
+    function testExchangeNLPWithPermitFailsWithZeroUser() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        vm.prank(relayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenKaiaExchange.InvalidUser.selector, address(0))
+        );
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            address(0) // Zero address should fail
+        );
+    }
+
+    function testExchangeNLPWithPermitFailsWithDisabledToken() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Disable KAIA token
+        vm.prank(owner);
+        exchange.setTokenEnabled(NLPToMultiTokenKaiaExchange.TokenType.KAIA, false);
+
+        vm.prank(relayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NLPToMultiTokenKaiaExchange.TokenNotEnabled.selector,
+                NLPToMultiTokenKaiaExchange.TokenType.KAIA
+            )
+        );
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+    }
+
+    function testExchangeNLPWithPermitFailsWhenPaused() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Pause the contract
+        vm.prank(emergencyManager);
+        exchange.pause();
+
+        vm.prank(relayer);
+        vm.expectRevert(); // Accept any revert due to paused state
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+    }
+
+    function testExchangeNLPWithPermitWorksInWhitelistMode() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Set to whitelist mode
+        vm.prank(owner);
+        exchange.setExchangeMode(NLPToMultiTokenKaiaExchange.ExchangeMode.WHITELIST);
+
+        // Add relayer to whitelist
+        address[] memory accounts = new address[](1);
+        bool[] memory whitelisted = new bool[](1);
+        accounts[0] = relayer;
+        whitelisted[0] = true;
+
+        vm.prank(whitelistManager);
+        exchange.updateWhitelist(accounts, whitelisted);
+
+        // Set up permit allowance for testing
+        vm.prank(user);
+        nlpToken.approve(address(exchange), nlpAmount);
+
+        // Should work with whitelisted relayer
+        vm.prank(relayer);
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+    }
+
+    function testExchangeNLPWithPermitFailsInWhitelistModeWithoutWhitelist() public {
+        uint nlpAmount = 1000 * 10 ** 18;
+        uint deadline = block.timestamp + 1 hours;
+        address relayer = address(0x99);
+
+        // Set to whitelist mode
+        vm.prank(owner);
+        exchange.setExchangeMode(NLPToMultiTokenKaiaExchange.ExchangeMode.WHITELIST);
+
+        // Don't add relayer to whitelist
+
+        vm.prank(relayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NLPToMultiTokenKaiaExchange.NotWhitelisted.selector, relayer)
+        );
+        exchange.exchangeNLPWithPermit(
+            NLPToMultiTokenKaiaExchange.TokenType.KAIA,
+            nlpAmount,
+            deadline,
+            0, // v
+            bytes32(0), // r
+            bytes32(0), // s
+            user
+        );
+    }
 
     /* ═══════════════════════════════════════════════════════════════════════
                               ADMIN FUNCTION TESTS
