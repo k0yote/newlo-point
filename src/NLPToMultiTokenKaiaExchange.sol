@@ -274,6 +274,9 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     error InsufficientBalance(TokenType tokenType, uint required, uint available);
+    error InvalidExchangeAmount(uint amount);
+    error InvalidUser(address user);
+    error PermitFailed(address user, uint nlpAmount, uint deadline);
     error PriceDataStale(uint updatedAt, uint threshold);
     error InvalidPriceData(int price);
     error ExchangeFailed(address user, uint nlpAmount);
@@ -920,6 +923,53 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         _emitExchangeEvent(
             tokenType, nlpAmount, user, relayer, tokenUsdPrice, jpyUsdPrice, amountResult
         );
+    }
+
+    /**
+     * @notice Exchange NLP tokens using permit (legacy function without slippage protection)
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @param deadline Permit deadline
+     * @param v ECDSA signature parameter
+     * @param r ECDSA signature parameter
+     * @param s ECDSA signature parameter
+     * @param user User address (token owner)
+     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithPermitAndSlippage for better protection.
+     */
+    function exchangeNLPWithPermit(
+        TokenType tokenType,
+        uint nlpAmount,
+        uint deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        address user
+    ) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        if (user == address(0)) {
+            revert InvalidUser(user);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        // Check exchange permission for relayer (operator)
+        _checkExchangePermission(msg.sender);
+
+        // Execute permit
+        try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
+            // Permit successful
+        } catch {
+            revert PermitFailed(user, nlpAmount, deadline);
+        }
+
+        // Execute exchange
+        _executeExchange(tokenType, nlpAmount, user, msg.sender, 0);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════

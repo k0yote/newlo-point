@@ -29,6 +29,7 @@ usage() {
     echo "  soneium-eth-distribution  - SoneiumETHDistribution"
     echo "  nlp-to-multi-token-kaia-exchange - NLPToMultiTokenKaiaExchange"
     echo "  pyth                      - IPyth"
+    echo "  nlp-to-multi-token-kaia-exchange - NLPToMultiTokenKaiaExchange"
     echo ""
     echo "Examples:"
     echo "  $0 newlo-point"
@@ -72,6 +73,10 @@ case "$1" in
     "pyth")
         echo "Compiling IPyth..."
         solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH src/pyth/IPyth.sol $OUTPUT_DIR
+        ;;
+    "nlp-to-multi-token-kaia-exchange")
+        echo "Compiling NLPToMultiTokenKaiaExchange..."
+        solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH $OPENZEPPELIN_INCLUDE src/NLPToMultiTokenKaiaExchange.sol $OUTPUT_DIR
         ;;
     "")
         echo "Error: No contract alias specified."
