@@ -20,13 +20,21 @@
 | **NLPToMultiTokenExchange** | [`0x277bFeC2194B389Bb975035EB72D157f9eAa3887`](https://soneium-minato.blockscout.com/address/0x277bFeC2194B389Bb975035EB72D157f9eAa3887) | Exchange contract from NewLo Point (NLP) to multiple tokens (ETH, USDC, USDT) |
 | **SoneiumETHDistribution** | [`0x8897494ac5B05486c76919055f68904344d78f5e`](https://soneium-minato.blockscout.com/address/0x8897494ac5B05486c76919055f68904344d78f5e) | Ultra-efficient bulk ETH distribution contract for Soneium network |
 
+### KAIA Mainnet
+| Contract | Address | Description |
+|----------|---------|-------------|
+| **NewLoPointFactory** | [`0xd9a7F28364F350005E304b2Bc0ee31aDeb765148`](https://kaiascan.io/address/0xd9a7F28364F350005E304b2Bc0ee31aDeb765148) | Factory contract for deterministic deployment |
+| **NewLoPoint** | [`0x06f7c01C2b228bB0652Db978d2aB1062F1a36E1b`](https://kaiascan.io/address/0x06f7c01C2b228bB0652Db978d2aB1062F1a36E1b) | Main ERC20 token contract with gradual transfer controls |
+| **TokenDistributionV2** | [`0x47B03Ca4742F64B2767c044aA4458c40E15EdF2B`](https://kaiascan.io/address/0x47B03Ca4742F64B2767c044aA4458c40E15EdF2B) | Ultra-efficient bulk distribution contract (92% gas savings) |
+| **NLPToMultiTokenKaiaExchange** | [`0x75bA44a838f73A54b753D0eCEc246D939B58DA84`](https://kaiascan.io/address/0x75bA44a838f73A54b753D0eCEc246D939B58DA84) | Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT) |
+
 ### Kairos(KAIA) Testnet
 | Contract | Address | Description |
 |----------|---------|-------------|
-| **NewLoPointFactory** | [`0x78DDE4fC369CA1F855F0271D8fa91E12e5ddDD91`](https://kairos.kaiascan.io/address/0x78DDE4fC369CA1F855F0271D8fa91E12e5ddDD91) | Factory contract for deterministic deployment |
-| **NewLoPoint** | [`0x953E835f5a6A0D51C21445BAF168c0621549684e`](https://kairos.kaiascan.io/address/0x953E835f5a6A0D51C21445BAF168c0621549684e) | Main ERC20 token contract with gradual transfer controls |
-| **TokenDistributionV2** | [`0x065A77bD8D7C3aec27B4F23B360D35379A2A01a9`](https://kairos.kaiascan.io/address/0x065A77bD8D7C3aec27B4F23B360D35379A2A01a9) | Ultra-efficient bulk distribution contract (92% gas savings) |
-| **NLPToMultiTokenKaiaExchange** | [`0x4449b48A0838c8d567627B6826303C63FD665A43`](https://kairos.kaiascan.io/address/0x4449b48A0838c8d567627B6826303C63FD665A43) | Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT) |
+| **NewLoPointFactory** | [`0x8468D7401524A6f2997c4c99cdF6B50005778736`](https://kairos.kaiascan.io/address/0x8468D7401524A6f2997c4c99cdF6B50005778736) | Factory contract for deterministic deployment |
+| **NewLoPoint** | [`0x73626144718baE2B3d0EBE230bC218ef9184086A`](https://kairos.kaiascan.io/address/0x73626144718baE2B3d0EBE230bC218ef9184086A) | Main ERC20 token contract with gradual transfer controls |
+| **TokenDistributionV2** | [`0x47B03Ca4742F64B2767c044aA4458c40E15EdF2B`](https://kairos.kaiascan.io/address/0x47B03Ca4742F64B2767c044aA4458c40E15EdF2B) | Ultra-efficient bulk distribution contract (92% gas savings) |
+| **NLPToMultiTokenKaiaExchange** | [`0x75bA44a838f73A54b753D0eCEc246D939B58DA84`](https://kairos.kaiascan.io/address/0x75bA44a838f73A54b753D0eCEc246D939B58DA84) | Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT) |
 
 ### Transfer Control Logic
 
