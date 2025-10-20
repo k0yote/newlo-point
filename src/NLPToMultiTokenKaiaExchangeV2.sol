@@ -1135,7 +1135,7 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
      * @return price Token price in USD (18 decimals)
      */
     function _getTokenPrice(TokenType tokenType) internal view returns (uint price) {
-        RoundData memory roundData = RoundData(0,0,0,0,0);
+        RoundData memory roundData = RoundData(0, 0, 0, 0, 0);
 
         if (tokenType == TokenType.KAIA) {
             roundData = kaiaUsdExternalRoundData;
@@ -1576,4 +1576,3 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
         // Allow KAIA deposits for exchange operations
     }
 }
-

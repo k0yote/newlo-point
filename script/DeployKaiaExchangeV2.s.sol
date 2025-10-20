@@ -249,9 +249,7 @@ contract DeployKaiaExchangeV2 is Script {
         console.log("5. Test exchanges with small amounts before going live");
         console.log("========================================");
         console.log("IMPORTANT WARNINGS:");
-        console.log(
-            "1. V2 DOES NOT USE ORACLES - All prices must be updated via backend API"
-        );
+        console.log("1. V2 DOES NOT USE ORACLES - All prices must be updated via backend API");
         console.log("2. Update all price feeds with current market data before enabling exchanges");
         console.log("3. Set up regular price updates from backend (recommended: every 1-5 minutes)");
         console.log("4. Monitor contract balance and refill as needed");
@@ -435,4 +433,3 @@ contract DeployKaiaExchangeV2Local is Script {
         console.log("========================================");
     }
 }
-

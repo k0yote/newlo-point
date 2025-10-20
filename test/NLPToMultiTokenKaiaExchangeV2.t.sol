@@ -436,7 +436,9 @@ contract NLPToMultiTokenKaiaExchangeV2Test is Test {
 
         // Get quote to calculate minAmountOut
         (uint minAmountOut,) = exchange.calculateMinAmountOut(
-            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA, nlpAmount, 100 // 1% slippage
+            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA,
+            nlpAmount,
+            100 // 1% slippage
         );
 
         // Approve and exchange with slippage protection
@@ -504,7 +506,9 @@ contract NLPToMultiTokenKaiaExchangeV2Test is Test {
 
         // Get quote to calculate minAmountOut
         (uint minAmountOut,) = exchange.calculateMinAmountOut(
-            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA, nlpAmount, 100 // 1% slippage
+            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA,
+            nlpAmount,
+            100 // 1% slippage
         );
 
         // Set up permit allowance for testing
@@ -532,8 +536,13 @@ contract NLPToMultiTokenKaiaExchangeV2Test is Test {
     function testGetExchangeQuote() public view {
         uint nlpAmount = 1000 * 10 ** 18;
 
-        (uint tokenAmount, uint tokenUsdRate, uint jpyUsdRate, uint exchangeFee, uint operationalFee)
-        = exchange.getExchangeQuote(NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA, nlpAmount);
+        (
+            uint tokenAmount,
+            uint tokenUsdRate,
+            uint jpyUsdRate,
+            uint exchangeFee,
+            uint operationalFee
+        ) = exchange.getExchangeQuote(NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA, nlpAmount);
 
         assertTrue(tokenAmount > 0);
         assertTrue(tokenUsdRate > 0);
@@ -554,7 +563,9 @@ contract NLPToMultiTokenKaiaExchangeV2Test is Test {
             uint minAmountOut,
             uint maxSlippageAmount
         ) = exchange.getExchangeQuoteWithSlippage(
-            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA, nlpAmount, 100 // 1% slippage
+            NLPToMultiTokenKaiaExchangeV2.TokenType.KAIA,
+            nlpAmount,
+            100 // 1% slippage
         );
 
         assertTrue(tokenAmount > 0);
@@ -672,4 +683,3 @@ contract NLPToMultiTokenKaiaExchangeV2Test is Test {
 
     receive() external payable { }
 }
-
