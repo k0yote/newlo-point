@@ -15,7 +15,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *
  * @dev Key Features:
  *      - User-specific NLP escrow system on Soneium
- *      - Operator-controlled burn and transfer functionality
+ *      - Operator-controlled burn and transfer functionality (backend operations only)
  *      - Configurable NLP to JPYC exchange rate (no oracle required)
  *      - Role-based access control for operations
  *      - Emergency pause functionality
@@ -23,16 +23,19 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *
  * @dev Cross-Chain Exchange Flow:
  *      Since JPYC exists on Polygon network and NLP exists on Soneium network:
- *      1. User deposits NLP tokens into escrow on Soneium (this contract)
- *      2. Off-chain system sends JPYC to user on Polygon network from operational wallet
- *      3a. SUCCESS: Operator burns escrowed NLP on Soneium
- *      3b. FAILURE: Operator returns escrowed NLP to user on Soneium
+ *      1. User signs permit (frontend) - only user action
+ *      2. Backend executes depositNLPWithPermit on Soneium (escrow NLP)
+ *      3. Backend sends JPYC to user on Polygon network
+ *      4a. SUCCESS: Backend burns escrowed NLP on Soneium
+ *      4b. FAILURE: Backend refunds escrowed NLP to user on Soneium
  *
  * @dev Important Notes:
  *      - JPYC token does NOT exist on Soneium network
- *      - JPYC transfers happen on Polygon network via operational wallet
+ *      - JPYC transfers happen on Polygon network via backend operational wallet
  *      - This contract only handles NLP escrow/burn/transfer on Soneium
  *      - Exchange rate is for calculation reference only, not enforced on-chain
+ *      - ALL operations are backend-controlled via OPERATOR_ROLE
+ *      - Users CANNOT directly deposit or withdraw (only via backend with permit)
  *
  * @dev Security Features:
  *      - Reentrancy protection
@@ -43,7 +46,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *
  * @dev Access Control Roles:
  *      - DEFAULT_ADMIN_ROLE: Super admin with all permissions
- *      - OPERATOR_ROLE: Can burn and transfer escrowed NLP
+ *      - OPERATOR_ROLE: Backend service that executes deposits, burns, and refunds
  *      - CONFIG_ROLE: Can update exchange rate and configurations
  *      - PAUSER_ROLE: Can pause/unpause the contract
  */
@@ -58,12 +61,6 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         JPYC // Japanese Yen Coin on Polygon network
     }
 
-    /// @notice Exchange access control modes
-    enum ExchangeMode {
-        WHITELIST, // Only whitelisted addresses can deposit
-        PUBLIC // Anyone can deposit (default)
-    }
-
     /* ═══════════════════════════════════════════════════════════════════════
                                    STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -71,21 +68,10 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     /// @notice User escrow information
     struct UserEscrow {
         uint totalDeposited; // Total NLP deposited by user
-        uint totalWithdrawn; // Total NLP withdrawn by user
         uint totalBurned; // Total NLP burned for user
         uint currentBalance; // Current escrowed NLP balance
         uint depositCount; // Number of deposits
         uint lastDepositTime; // Last deposit timestamp
-    }
-
-    /// @notice Exchange statistics
-    struct ExchangeStats {
-        uint totalDeposited; // Total NLP deposited across all users
-        uint totalWithdrawn; // Total NLP withdrawn across all users
-        uint totalBurned; // Total NLP burned across all users
-        uint totalTransferred; // Total NLP transferred across all users
-        uint activeUsers; // Number of users with active escrow balance
-        uint totalTransactions; // Total number of transactions
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -112,7 +98,6 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 public constant CONFIG_ROLE = keccak256("CONFIG_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-    bytes32 public constant WHITELIST_MANAGER_ROLE = keccak256("WHITELIST_MANAGER_ROLE");
 
     /* ═══════════════════════════════════════════════════════════════════════
                               MUTABLE STATE
@@ -121,31 +106,17 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     /// @notice User escrow balances
     mapping(address => UserEscrow) public userEscrows;
 
-    /// @notice Global exchange statistics
-    ExchangeStats public exchangeStats;
+    /// @notice Exchange fee rate in basis points (100 = 1%)
+    /// @dev This fee is deducted from NLP exchange amount
+    uint public exchangeFeeRate;
 
-    /// @notice Treasury address for emergency withdrawals
-    address public treasury;
-
-    /// @notice Current exchange mode (defaults to PUBLIC)
-    ExchangeMode public exchangeMode = ExchangeMode.PUBLIC;
-
-    /// @notice Whitelist for deposit access (used in WHITELIST mode)
-    mapping(address => bool) public whitelist;
+    /// @notice Operational fee rate in basis points (100 = 1%)
+    /// @dev This fee is deducted from NLP exchange amount for gasless transactions
+    uint public operationalFeeRate;
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    EVENTS
     ═══════════════════════════════════════════════════════════════════════ */
-
-    /// @notice Emitted when user deposits NLP into escrow on Soneium
-    /// @param user User address who deposited
-    /// @param nlpAmount Amount of NLP deposited
-    /// @param currentBalance User's current escrow balance
-    /// @param jpycEquivalent Equivalent JPYC amount (reference only, actual JPYC on Polygon)
-    event Deposited(address indexed user, uint nlpAmount, uint currentBalance, uint jpycEquivalent);
-
-    /// @notice Emitted when user withdraws NLP from escrow on Soneium
-    event Withdrawn(address indexed user, uint nlpAmount, uint remainingBalance);
 
     /// @notice Emitted when operator burns escrowed NLP (after successful JPYC transfer on Polygon)
     /// @param user User who received JPYC on Polygon
@@ -181,22 +152,16 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     /// @notice Emitted when minimum deposit amount is updated
     event MinDepositAmountUpdated(uint oldAmount, uint newAmount, address updatedBy);
 
-    /// @notice Emitted when treasury address is updated
-    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
-
-    /// @notice Emitted when emergency withdrawal is executed
-    event EmergencyWithdraw(address indexed to, uint amount, address executor);
-
-    /// @notice Emitted when exchange mode is updated
-    event ExchangeModeUpdated(ExchangeMode oldMode, ExchangeMode newMode, address updatedBy);
-
-    /// @notice Emitted when address is added/removed from whitelist
-    event WhitelistUpdated(address indexed account, bool whitelisted, address updatedBy);
-
     /// @notice Emitted when gasless deposit with permit is executed
     event GaslessDepositExecuted(
         address indexed user, address indexed relayer, uint nlpAmount, uint jpycEquivalent
     );
+
+    /// @notice Emitted when exchange fee rate is updated
+    event ExchangeFeeRateUpdated(uint oldRate, uint newRate, address updatedBy);
+
+    /// @notice Emitted when operational fee rate is updated
+    event OperationalFeeRateUpdated(uint oldRate, uint newRate, address updatedBy);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                    ERRORS
@@ -209,11 +174,10 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     error InvalidRate(uint rate);
     error TransferFailed();
     error BurnFailed();
-    error TreasuryNotSet();
     error InvalidAmount(uint amount);
     error NoEscrowBalance(address user);
-    error NotWhitelisted(address user);
     error PermitFailed(address user, uint nlpAmount, uint deadline);
+    error InvalidFeeRate(uint rate);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
@@ -223,70 +187,35 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @notice Initialize the NLP to JPYC exchange adapter
      * @param _nlpToken NewLo Point token contract address on Soneium
      * @param _initialAdmin Initial admin of the contract
+     * @param _exchangeFeeRate Exchange fee rate in basis points (100 = 1%, max 10000 = 100%)
+     * @param _operationalFeeRate Operational fee rate in basis points (100 = 1%, max 10000 = 100%)
      * @dev JPYC token is NOT stored as it exists on Polygon network, not Soneium
      */
-    constructor(address _nlpToken, address _initialAdmin) {
+    constructor(
+        address _nlpToken,
+        address _initialAdmin,
+        uint _exchangeFeeRate,
+        uint _operationalFeeRate
+    ) {
         if (_nlpToken == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
+        if (_exchangeFeeRate > 10000) revert InvalidFeeRate(_exchangeFeeRate);
+        if (_operationalFeeRate > 10000) revert InvalidFeeRate(_operationalFeeRate);
 
         nlpToken = IERC20Extended(_nlpToken);
+        exchangeFeeRate = _exchangeFeeRate;
+        operationalFeeRate = _operationalFeeRate;
 
         // Set up access control roles
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(OPERATOR_ROLE, _initialAdmin);
         _grantRole(CONFIG_ROLE, _initialAdmin);
         _grantRole(PAUSER_ROLE, _initialAdmin);
-        _grantRole(WHITELIST_MANAGER_ROLE, _initialAdmin);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
                             ESCROW FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
-
-    /**
-     * @notice Deposit NLP tokens into escrow
-     * @param nlpAmount Amount of NLP tokens to deposit
-     * @dev User must approve this contract to spend NLP tokens first
-     */
-    function depositNLP(uint nlpAmount) external nonReentrant whenNotPaused {
-        if (nlpAmount == 0) revert ZeroAmount();
-        if (nlpAmount < minDepositAmount) revert BelowMinimumDeposit(nlpAmount, minDepositAmount);
-
-        // Check deposit permission
-        _checkExchangePermission(msg.sender);
-
-        address user = msg.sender;
-        UserEscrow storage escrow = userEscrows[user];
-
-        // Track active users
-        if (escrow.currentBalance == 0 && nlpAmount > 0) {
-            unchecked {
-                exchangeStats.activeUsers += 1;
-            }
-        }
-
-        // Update user escrow
-        unchecked {
-            escrow.totalDeposited += nlpAmount;
-            escrow.currentBalance += nlpAmount;
-            escrow.depositCount += 1;
-            escrow.lastDepositTime = block.timestamp;
-        }
-
-        // Update global statistics
-        unchecked {
-            exchangeStats.totalDeposited += nlpAmount;
-            exchangeStats.totalTransactions += 1;
-        }
-
-        // Calculate JPYC equivalent for event
-        uint jpycEquivalent = calculateJPYCAmount(nlpAmount);
-
-        emit Deposited(user, nlpAmount, escrow.currentBalance, jpycEquivalent);
-
-        // Transfer NLP tokens from user to this contract
-        if (!nlpToken.transferFrom(user, address(this), nlpAmount)) revert TransferFailed();
-    }
 
     /**
      * @notice Deposit NLP tokens using permit (gasless transaction)
@@ -296,6 +225,7 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @param r ECDSA signature parameter
      * @param s ECDSA signature parameter
      * @param user User address (token owner)
+     * @dev Only callable by OPERATOR_ROLE (backend service)
      * @dev Allows gasless deposits via EIP-2612 permit
      */
     function depositNLPWithPermit(
@@ -305,13 +235,10 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         bytes32 r,
         bytes32 s,
         address user
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused onlyRole(OPERATOR_ROLE) {
         if (nlpAmount == 0) revert ZeroAmount();
         if (nlpAmount < minDepositAmount) revert BelowMinimumDeposit(nlpAmount, minDepositAmount);
         if (user == address(0)) revert ZeroAddress();
-
-        // Check deposit permission for relayer (operator)
-        _checkExchangePermission(msg.sender);
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
@@ -323,25 +250,12 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
 
         UserEscrow storage escrow = userEscrows[user];
 
-        // Track active users
-        if (escrow.currentBalance == 0 && nlpAmount > 0) {
-            unchecked {
-                exchangeStats.activeUsers += 1;
-            }
-        }
-
         // Update user escrow
         unchecked {
             escrow.totalDeposited += nlpAmount;
             escrow.currentBalance += nlpAmount;
             escrow.depositCount += 1;
             escrow.lastDepositTime = block.timestamp;
-        }
-
-        // Update global statistics
-        unchecked {
-            exchangeStats.totalDeposited += nlpAmount;
-            exchangeStats.totalTransactions += 1;
         }
 
         // Calculate JPYC equivalent for event
@@ -353,48 +267,6 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         if (!nlpToken.transferFrom(user, address(this), nlpAmount)) revert TransferFailed();
     }
 
-    /**
-     * @notice Withdraw NLP tokens from escrow
-     * @param nlpAmount Amount of NLP tokens to withdraw (0 for all)
-     * @dev User can only withdraw their own escrowed tokens
-     */
-    function withdrawNLP(uint nlpAmount) external nonReentrant whenNotPaused {
-        address user = msg.sender;
-        UserEscrow storage escrow = userEscrows[user];
-
-        uint availableBalance = escrow.currentBalance;
-        if (availableBalance == 0) revert NoEscrowBalance(user);
-
-        uint withdrawAmount = nlpAmount == 0 ? availableBalance : nlpAmount;
-        if (withdrawAmount > availableBalance) {
-            revert InsufficientBalance(user, withdrawAmount, availableBalance);
-        }
-
-        // Update user escrow
-        unchecked {
-            escrow.totalWithdrawn += withdrawAmount;
-            escrow.currentBalance -= withdrawAmount;
-        }
-
-        // Track active users
-        if (escrow.currentBalance == 0) {
-            unchecked {
-                exchangeStats.activeUsers -= 1;
-            }
-        }
-
-        // Update global statistics
-        unchecked {
-            exchangeStats.totalWithdrawn += withdrawAmount;
-            exchangeStats.totalTransactions += 1;
-        }
-
-        emit Withdrawn(user, withdrawAmount, escrow.currentBalance);
-
-        // Transfer NLP tokens back to user
-        if (!nlpToken.transfer(user, withdrawAmount)) revert TransferFailed();
-    }
-
     /* ═══════════════════════════════════════════════════════════════════════
                           OPERATOR FUNCTIONS
     ═══════════════════════════════════════════════════════════════════════ */
@@ -404,7 +276,7 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @param user User address whose NLP will be burned
      * @param nlpAmount Amount of NLP tokens to burn
      * @param reason Reason for burning (for off-chain tracking)
-     * @dev Only callable by OPERATOR_ROLE
+     * @dev Only callable by OPERATOR_ROLE (backend service)
      */
     function burnEscrowedNLP(address user, uint nlpAmount, string calldata reason)
         external
@@ -429,19 +301,6 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
             escrow.currentBalance -= nlpAmount;
         }
 
-        // Track active users
-        if (escrow.currentBalance == 0) {
-            unchecked {
-                exchangeStats.activeUsers -= 1;
-            }
-        }
-
-        // Update global statistics
-        unchecked {
-            exchangeStats.totalBurned += nlpAmount;
-            exchangeStats.totalTransactions += 1;
-        }
-
         // Calculate JPYC equivalent for event
         uint jpycEquivalent = calculateJPYCAmount(nlpAmount);
 
@@ -462,7 +321,8 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @param to Destination address (typically the user for refunds)
      * @param nlpAmount Amount of NLP tokens to transfer
      * @param reason Reason for transfer (for off-chain tracking)
-     * @dev Only callable by OPERATOR_ROLE
+     * @dev Only callable by OPERATOR_ROLE (backend service)
+     * @dev Primarily used for refunds when JPYC transfer on Polygon fails
      */
     function transferEscrowedNLP(address from, address to, uint nlpAmount, string calldata reason)
         external
@@ -487,79 +347,10 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
             escrow.currentBalance -= nlpAmount;
         }
 
-        // Track active users
-        if (escrow.currentBalance == 0) {
-            unchecked {
-                exchangeStats.activeUsers -= 1;
-            }
-        }
-
-        // Update global statistics
-        unchecked {
-            exchangeStats.totalTransferred += nlpAmount;
-            exchangeStats.totalTransactions += 1;
-        }
-
         emit EscrowedNLPTransferred(from, to, msg.sender, nlpAmount, reason);
 
         // Transfer NLP tokens to destination
         if (!nlpToken.transfer(to, nlpAmount)) revert TransferFailed();
-    }
-
-    /**
-     * @notice Batch burn escrowed NLP tokens for multiple users
-     * @param users Array of user addresses
-     * @param nlpAmounts Array of NLP amounts to burn for each user
-     * @param reason Reason for burning (applies to all)
-     * @dev Only callable by OPERATOR_ROLE
-     */
-    function batchBurnEscrowedNLP(
-        address[] calldata users,
-        uint[] calldata nlpAmounts,
-        string calldata reason
-    ) external nonReentrant whenNotPaused onlyRole(OPERATOR_ROLE) {
-        require(users.length == nlpAmounts.length, "Array length mismatch");
-
-        for (uint i = 0; i < users.length; i++) {
-            if (users[i] == address(0)) continue;
-            if (nlpAmounts[i] == 0) continue;
-
-            UserEscrow storage escrow = userEscrows[users[i]];
-            uint availableBalance = escrow.currentBalance;
-
-            if (availableBalance == 0) continue;
-            if (nlpAmounts[i] > availableBalance) continue;
-
-            // Update user escrow
-            unchecked {
-                escrow.totalBurned += nlpAmounts[i];
-                escrow.currentBalance -= nlpAmounts[i];
-            }
-
-            // Track active users
-            if (escrow.currentBalance == 0) {
-                unchecked {
-                    exchangeStats.activeUsers -= 1;
-                }
-            }
-
-            // Update global statistics
-            unchecked {
-                exchangeStats.totalBurned += nlpAmounts[i];
-                exchangeStats.totalTransactions += 1;
-            }
-
-            uint jpycEquivalent = calculateJPYCAmount(nlpAmounts[i]);
-            emit EscrowedNLPBurned(users[i], msg.sender, nlpAmounts[i], jpycEquivalent, reason);
-
-            // Burn NLP tokens
-            try nlpToken.burn(nlpAmounts[i]) {
-            // Burn successful
-            }
-            catch {
-                revert BurnFailed();
-            }
-        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -589,64 +380,28 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         emit MinDepositAmountUpdated(oldAmount, newMinAmount, msg.sender);
     }
 
-    /* ═══════════════════════════════════════════════════════════════════════
-                      ACCESS CONTROL MANAGEMENT FUNCTIONS
-    ═══════════════════════════════════════════════════════════════════════ */
-
     /**
-     * @notice Set the exchange mode
-     * @param newMode New exchange mode
-     * @dev Only CONFIG_ROLE can change the exchange mode
+     * @notice Update the exchange fee rate
+     * @param newFeeRate New fee rate in basis points (100 = 1%, max 10000 = 100%)
+     * @dev This is a reference value for off-chain JPYC calculation on Polygon
      */
-    function setExchangeMode(ExchangeMode newMode) external onlyRole(CONFIG_ROLE) {
-        ExchangeMode oldMode = exchangeMode;
-        exchangeMode = newMode;
-        emit ExchangeModeUpdated(oldMode, newMode, msg.sender);
+    function updateExchangeFeeRate(uint newFeeRate) external onlyRole(CONFIG_ROLE) {
+        if (newFeeRate > 10000) revert InvalidFeeRate(newFeeRate); // Max 100%
+        uint oldRate = exchangeFeeRate;
+        exchangeFeeRate = newFeeRate;
+        emit ExchangeFeeRateUpdated(oldRate, newFeeRate, msg.sender);
     }
 
     /**
-     * @notice Add or remove addresses from whitelist
-     * @param accounts Array of addresses to update
-     * @param whitelisted Array of whitelist status for each address
-     * @dev Only WHITELIST_MANAGER_ROLE can manage the whitelist
+     * @notice Update the operational fee rate
+     * @param newFeeRate New fee rate in basis points (100 = 1%, max 10000 = 100%)
+     * @dev This fee is deducted from NLP exchange amount for gasless transactions
      */
-    function updateWhitelist(address[] calldata accounts, bool[] calldata whitelisted)
-        external
-        onlyRole(WHITELIST_MANAGER_ROLE)
-    {
-        require(accounts.length == whitelisted.length, "Array length mismatch");
-
-        for (uint i = 0; i < accounts.length; i++) {
-            whitelist[accounts[i]] = whitelisted[i];
-            emit WhitelistUpdated(accounts[i], whitelisted[i], msg.sender);
-        }
-    }
-
-    /**
-     * @notice Check if user can perform deposit
-     * @param user User address to check
-     * @dev Gas-optimized: checks PUBLIC mode first
-     */
-    function _checkExchangePermission(address user) internal view {
-        // Gas optimization: most common case first
-        if (exchangeMode == ExchangeMode.PUBLIC) {
-            return; // No restrictions
-        } else if (exchangeMode == ExchangeMode.WHITELIST) {
-            if (!whitelist[user]) {
-                revert NotWhitelisted(user);
-            }
-        }
-    }
-
-    /**
-     * @notice Set treasury address for emergency withdrawals
-     * @param newTreasury New treasury address
-     */
-    function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (newTreasury == address(0)) revert ZeroAddress();
-        address oldTreasury = treasury;
-        treasury = newTreasury;
-        emit TreasuryUpdated(oldTreasury, newTreasury);
+    function updateOperationalFeeRate(uint newFeeRate) external onlyRole(CONFIG_ROLE) {
+        if (newFeeRate > 10000) revert InvalidFeeRate(newFeeRate); // Max 100%
+        uint oldRate = operationalFeeRate;
+        operationalFeeRate = newFeeRate;
+        emit OperationalFeeRateUpdated(oldRate, newFeeRate, msg.sender);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -660,14 +415,6 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      */
     function getUserEscrow(address user) external view returns (UserEscrow memory escrow) {
         escrow = userEscrows[user];
-    }
-
-    /**
-     * @notice Get global exchange statistics
-     * @return stats Exchange statistics
-     */
-    function getExchangeStats() external view returns (ExchangeStats memory stats) {
-        stats = exchangeStats;
     }
 
     /**
@@ -705,22 +452,14 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Get current contract balance of NLP tokens
-     * @return balance Current NLP balance
-     */
-    function getContractNLPBalance() external view returns (uint balance) {
-        return nlpToken.balanceOf(address(this));
-    }
-
-    /**
      * @notice Get exchange quote for specified NLP amount
      * @param tokenType Token type (must be JPYC, only supported type in this adapter)
      * @param nlpAmount Amount of NLP tokens
-     * @return jpycAmount Equivalent JPYC amount (reference only)
+     * @return jpycAmount Net JPYC amount after fees (reference only for off-chain Polygon transfer)
      * @return rate Current NLP to JPYC rate numerator
      * @return denominator Rate denominator (always 100)
-     * @return exchangeFee Exchange fee amount (always 0, no fees in this adapter)
-     * @return operationalFee Operational fee amount (always 0, no fees in this adapter)
+     * @return exchangeFee Exchange fee amount in JPYC
+     * @return operationalFee Operational fee amount in JPYC
      * @dev This is for display purposes only. Actual JPYC transfer happens on Polygon.
      * @dev ABI compatible with NLPToMultiTokenExchange for frontend consistency
      * @dev tokenType parameter is included for ABI compatibility but must be JPYC
@@ -743,11 +482,20 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
             return (0, nlpToJpycRate, RATE_DENOMINATOR, 0, 0);
         }
 
-        jpycAmount = calculateJPYCAmount(nlpAmount);
+        // Calculate gross JPYC amount
+        uint grossJpycAmount = calculateJPYCAmount(nlpAmount);
+
+        // Calculate exchange fee
+        exchangeFee = (grossJpycAmount * exchangeFeeRate) / 10000;
+
+        // Calculate operational fee
+        operationalFee = (grossJpycAmount * operationalFeeRate) / 10000;
+
+        // Calculate net JPYC amount after fees
+        jpycAmount = grossJpycAmount - exchangeFee - operationalFee;
+
         rate = nlpToJpycRate;
         denominator = RATE_DENOMINATOR;
-        exchangeFee = 0; // No exchange fee in this adapter
-        operationalFee = 0; // No operational fee in this adapter
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -766,30 +514,5 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      */
     function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
-    }
-
-    /**
-     * @notice Emergency withdrawal of NLP tokens to treasury
-     * @param amount Amount to withdraw (0 for all)
-     * @dev Only callable when paused
-     */
-    function emergencyWithdrawNLP(uint amount)
-        external
-        whenPaused
-        nonReentrant
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        if (treasury == address(0)) revert TreasuryNotSet();
-
-        uint balance = nlpToken.balanceOf(address(this));
-        uint withdrawAmount = amount == 0 ? balance : amount;
-
-        if (withdrawAmount > balance) {
-            revert InsufficientBalance(address(this), withdrawAmount, balance);
-        }
-
-        emit EmergencyWithdraw(treasury, withdrawAmount, msg.sender);
-
-        if (!nlpToken.transfer(treasury, withdrawAmount)) revert TransferFailed();
     }
 }

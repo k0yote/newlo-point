@@ -19,7 +19,6 @@ contract DeployJPYCExchangeAdapter is Script {
     // Soneium mainnet addresses (Update these with actual addresses)
     address SONEIUM_ADMIN = vm.envAddress("SONEIUM_ADMIN");
     address SONEIUM_OPERATOR = vm.envAddress("SONEIUM_OPERATOR");
-    address SONEIUM_TREASURY = vm.envAddress("SONEIUM_TREASURY");
 
     // Token addresses (only NLP needed - JPYC is on Polygon)
     address SONEIUM_NLP_TOKEN = vm.envAddress("SONEIUM_NLP_TOKEN");
@@ -38,7 +37,6 @@ contract DeployJPYCExchangeAdapter is Script {
         // Validate addresses before deployment
         require(SONEIUM_ADMIN != address(0), "Admin address cannot be zero");
         require(SONEIUM_OPERATOR != address(0), "Operator address cannot be zero");
-        require(SONEIUM_TREASURY != address(0), "Treasury address cannot be zero");
         require(SONEIUM_NLP_TOKEN != address(0), "NLP token address cannot be zero");
         require(INITIAL_NLP_TO_JPYC_RATE > 0, "Rate must be greater than zero");
         require(MIN_DEPOSIT_AMOUNT > 0, "Min deposit must be greater than zero");
@@ -46,8 +44,9 @@ contract DeployJPYCExchangeAdapter is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy the adapter contract (no JPYC token - it's on Polygon)
+        // Default fee rates: 0% exchange fee, 0% operational fee
         NLPToJPYCExchangeAdapter adapter =
-            new NLPToJPYCExchangeAdapter(SONEIUM_NLP_TOKEN, SONEIUM_ADMIN);
+            new NLPToJPYCExchangeAdapter(SONEIUM_NLP_TOKEN, SONEIUM_ADMIN, 0, 0);
 
         console.log("NLPToJPYCExchangeAdapter deployed at:", address(adapter));
 
@@ -57,10 +56,6 @@ contract DeployJPYCExchangeAdapter is Script {
         adapter.grantRole(adapter.PAUSER_ROLE(), SONEIUM_ADMIN);
 
         console.log("Roles granted successfully");
-
-        // Set treasury address
-        adapter.setTreasury(SONEIUM_TREASURY);
-        console.log("Treasury set to:", SONEIUM_TREASURY);
 
         // Configure exchange rate if different from default
         if (INITIAL_NLP_TO_JPYC_RATE != 100) {
@@ -81,7 +76,6 @@ contract DeployJPYCExchangeAdapter is Script {
         console.log("Contract Address:", address(adapter));
         console.log("Admin:", SONEIUM_ADMIN);
         console.log("Operator:", SONEIUM_OPERATOR);
-        console.log("Treasury:", SONEIUM_TREASURY);
         console.log("========================================");
         console.log("Token Configuration:");
         console.log("NLP Token (Soneium):", SONEIUM_NLP_TOKEN);
@@ -128,7 +122,9 @@ contract DeployJPYCExchangeAdapterLocal is Script {
         console.log("NOTE: JPYC is on Polygon network, not deployed here");
 
         // Deploy the adapter contract (no JPYC token needed)
-        NLPToJPYCExchangeAdapter adapter = new NLPToJPYCExchangeAdapter(address(nlpToken), deployer);
+        // Default fee rates: 0% exchange fee, 0% operational fee
+        NLPToJPYCExchangeAdapter adapter =
+            new NLPToJPYCExchangeAdapter(address(nlpToken), deployer, 0, 0);
 
         console.log("NLPToJPYCExchangeAdapter deployed at:", address(adapter));
 
@@ -139,10 +135,6 @@ contract DeployJPYCExchangeAdapterLocal is Script {
 
         console.log("Roles granted to deployer for testing");
 
-        // Set treasury address
-        adapter.setTreasury(deployer);
-        console.log("Treasury set to deployer");
-
         // Enable global transfers for NLP
         nlpToken.setTransfersEnabled(true);
         console.log("Global transfers enabled for NLP");
@@ -152,21 +144,15 @@ contract DeployJPYCExchangeAdapterLocal is Script {
         nlpToken.mint(deployer, testAmount);
         console.log("Minted", testAmount / 1e18, "NLP to deployer");
 
-        // Test deposit (optional)
-        console.log("Testing deposit functionality...");
-        uint depositAmount = 100e18;
-        nlpToken.approve(address(adapter), depositAmount);
-        adapter.depositNLP(depositAmount);
-        console.log("Successfully deposited", depositAmount / 1e18, "NLP to adapter");
+        // Test deposit with permit (depositNLP function was removed, only permit version available)
+        // console.log("Testing deposit functionality...");
+        // uint depositAmount = 100e18;
+        // Note: Use depositNLPWithPermit instead of depositNLP
+        // console.log("Use depositNLPWithPermit for gasless deposits");
 
-        // Get escrow info
+        // Get escrow info (will be 0 until deposit is made)
         NLPToJPYCExchangeAdapter.UserEscrow memory escrow = adapter.getUserEscrow(deployer);
         console.log("Escrow balance:", escrow.currentBalance / 1e18, "NLP");
-
-        // Get stats
-        NLPToJPYCExchangeAdapter.ExchangeStats memory stats = adapter.getExchangeStats();
-        console.log("Total deposited:", stats.totalDeposited / 1e18, "NLP");
-        console.log("Active users:", stats.activeUsers);
 
         vm.stopBroadcast();
 
@@ -182,11 +168,10 @@ contract DeployJPYCExchangeAdapterLocal is Script {
         console.log("NLP to JPYC Rate:", adapter.nlpToJpycRate(), "/ 100");
         console.log("Min Deposit:", adapter.minDepositAmount() / 1e18, "NLP");
         console.log("========================================");
-        console.log("Test Commands:");
-        console.log("Deposit NLP: adapter.depositNLP(amount)");
-        console.log("Withdraw NLP: adapter.withdrawNLP(amount)");
+        console.log("Backend Operations (OPERATOR_ROLE required):");
+        console.log("Deposit (permit): adapter.depositNLPWithPermit(...)");
         console.log("Burn Escrow: adapter.burnEscrowedNLP(user, amount, reason)");
-        console.log("Transfer Escrow: adapter.transferEscrowedNLP(from, to, amount, reason)");
+        console.log("Transfer/Refund: adapter.transferEscrowedNLP(from, to, amount, reason)");
         console.log("========================================");
     }
 }
@@ -200,7 +185,6 @@ contract DeployJPYCExchangeAdapterSoneium is Script {
     // Soneium Minato testnet addresses
     address constant SONEIUM_MINATO_ADMIN = address(0); // TODO: Set actual admin
     address constant SONEIUM_MINATO_OPERATOR = address(0); // TODO: Set actual operator
-    address constant SONEIUM_MINATO_TREASURY = address(0); // TODO: Set actual treasury
     address constant SONEIUM_MINATO_NLP_TOKEN = address(0); // TODO: Set actual NLP token on Soneium
 
     function run() external {
@@ -213,22 +197,19 @@ contract DeployJPYCExchangeAdapterSoneium is Script {
         // Validate addresses
         require(SONEIUM_MINATO_ADMIN != address(0), "Set ADMIN address");
         require(SONEIUM_MINATO_OPERATOR != address(0), "Set OPERATOR address");
-        require(SONEIUM_MINATO_TREASURY != address(0), "Set TREASURY address");
         require(SONEIUM_MINATO_NLP_TOKEN != address(0), "Set NLP token address on Soneium");
 
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy the adapter (JPYC is on Polygon, not Soneium)
+        // Default fee rates: 0% exchange fee, 0% operational fee
         NLPToJPYCExchangeAdapter adapter =
-            new NLPToJPYCExchangeAdapter(SONEIUM_MINATO_NLP_TOKEN, SONEIUM_MINATO_ADMIN);
+            new NLPToJPYCExchangeAdapter(SONEIUM_MINATO_NLP_TOKEN, SONEIUM_MINATO_ADMIN, 0, 0);
 
         console.log("Deployed at:", address(adapter));
 
         // Grant roles
         adapter.grantRole(adapter.OPERATOR_ROLE(), SONEIUM_MINATO_OPERATOR);
-
-        // Set treasury
-        adapter.setTreasury(SONEIUM_MINATO_TREASURY);
 
         vm.stopBroadcast();
 
