@@ -332,9 +332,13 @@ contract TokenDistribution is Ownable, ReentrancyGuard, Pausable {
         )
     {
         uint currentDay = block.timestamp / 86400;
-        return (
-            totalDistributed, totalDistributions, dailyDistributions[currentDay], antiDuplicateMode
-        );
+        return
+            (
+                totalDistributed,
+                totalDistributions,
+                dailyDistributions[currentDay],
+                antiDuplicateMode
+            );
     }
 
     /**

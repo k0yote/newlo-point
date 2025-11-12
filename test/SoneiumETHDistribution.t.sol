@@ -566,8 +566,9 @@ contract ReentrancyAttacker {
     receive() external payable {
         // This will fail due to reentrancy protection
         try distribution.getContractBalance() {
-            // If we can call a view function, that's fine
-        } catch {
+        // If we can call a view function, that's fine
+        }
+            catch {
             // Expected to fail for state-changing functions
         }
     }

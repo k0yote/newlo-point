@@ -612,9 +612,7 @@ contract MultiTokenDistribution is AccessControl, ReentrancyGuard, Pausable {
             // Add to user's distribution history
             userDistributionHistory[users[i]].push(
                 DistributionRecord({
-                    amount: amounts[i],
-                    timestamp: currentTime,
-                    tokenSymbol: symbol
+                    amount: amounts[i], timestamp: currentTime, tokenSymbol: symbol
                 })
             );
 

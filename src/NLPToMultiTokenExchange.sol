@@ -6,8 +6,9 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
-import { AggregatorV3Interface } from
-    "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 
 /**
@@ -69,7 +70,6 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     enum ExchangeMode {
         WHITELIST, // Only whitelisted addresses
         PUBLIC // Anyone can exchange (gas optimized default)
-
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -459,9 +459,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         }
 
         operationalFeeConfigs[tokenType] = OperationalFeeConfig({
-            feeRate: feeRate,
-            feeRecipient: feeRecipient,
-            isEnabled: isEnabled
+            feeRate: feeRate, feeRecipient: feeRecipient, isEnabled: isEnabled
         });
 
         emit OperationalFeeConfigUpdated(tokenType, feeRate, feeRecipient, isEnabled);
@@ -903,8 +901,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
     {
         // Burn NLP tokens
         try nlpToken.burnFrom(user, nlpAmount) {
-            // Burn successful
-        } catch {
+        // Burn successful
+        }
+        catch {
             revert ExchangeFailed(user, nlpAmount);
         }
 
@@ -1070,8 +1069,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
+        // Permit successful
+        }
+        catch {
             revert PermitFailed(user, nlpAmount, deadline);
         }
 
@@ -1118,8 +1118,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
+        // Permit successful
+        }
+        catch {
             revert PermitFailed(user, nlpAmount, deadline);
         }
 
@@ -1297,7 +1298,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 tokenAmount = amountResult.tokenAmount;
                 tokenUsdRate = priceResult.tokenUsdPrice;
                 jpyUsdRate = priceResult.jpyUsdPrice;
@@ -1337,11 +1340,7 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
      * @param tokenType Token type to get config for
      * @return config Token configuration
      */
-    function getTokenConfig(TokenType tokenType)
-        external
-        view
-        returns (TokenConfig memory config)
-    {
+    function getTokenConfig(TokenType tokenType) external view returns (TokenConfig memory config) {
         config = tokenConfigs[tokenType];
     }
 
@@ -1446,7 +1445,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 quoteAmount = amountResult.tokenAmount;
                 // Calculate minimum amount considering slippage
                 minAmountOut = (quoteAmount * (10000 - slippageToleranceBps)) / 10000;
@@ -1497,7 +1498,9 @@ contract NLPToMultiTokenExchange is AccessControl, ReentrancyGuard, Pausable {
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 tokenAmount = amountResult.tokenAmount;
                 tokenUsdRate = priceResult.tokenUsdPrice;
                 jpyUsdRate = priceResult.jpyUsdPrice;

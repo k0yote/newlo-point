@@ -537,15 +537,17 @@ contract TokenDistributionV2 is AccessControl, ReentrancyGuard, Pausable {
     {
         // Step 1: Enable whitelist mode on token contract
         try nlpToken.setWhitelistModeEnabled(true) {
-            // Success - whitelist mode enabled
-        } catch {
+        // Success - whitelist mode enabled
+        }
+            catch {
             // Already enabled or insufficient permissions - continue
         }
 
         // Step 2: Add this contract to whitelist
         try nlpToken.setWhitelistedAddress(address(this), true) {
-            // Success - contract whitelisted
-        } catch {
+        // Success - contract whitelisted
+        }
+        catch {
             // Insufficient permissions or already whitelisted
             revert(
                 "Setup failed: Cannot whitelist this contract. Please ensure you have WHITELIST_MANAGER_ROLE on the token contract."

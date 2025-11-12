@@ -6,8 +6,9 @@ import { NLPToETHExchange } from "../src/NLPToETHExchange.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { NewLoPointFactory } from "../src/NewLoPointFactory.sol";
 import { MockV3Aggregator } from "../src/mocks/MockV3Aggregator.sol";
-import { TransparentUpgradeableProxy } from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
 contract NLPToETHExchangeTest is Test {

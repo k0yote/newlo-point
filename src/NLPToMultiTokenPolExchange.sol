@@ -6,19 +6,22 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
-import { PythAggregatorV3, IPyth } from "./pyth/PythAggregatorV3.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 
 /**
- * @title NLPToMultiTokenKaiaExchange
+ * @title NLPToMultiTokenPolExchange
  * @author NewLo Team
- * @notice Exchange contract from NewLo Point (NLP) to multiple tokens (KAIA, USDC, USDT)
+ * @notice Exchange contract from NewLo Point (NLP) to multiple tokens (MATIC, USDC, USDT, JPYC) on Polygon
  * @dev This contract allows users to exchange NLP tokens for multiple tokens using flexible price feeds
  *
  * @dev Key Features:
  *      - Configurable NLP to JPY exchange rate
- *      - Multi-token support (KAIA, USDC, USDT)
- *      - Oracle-based price management with JPY/USD external data support
+ *      - Multi-token support (MATIC, USDC, USDT, JPYC)
+ *      - JPYC 1:1 direct exchange (1 NLP = 1 JPYC)
+ *      - Oracle-based price management for other tokens
  *      - Role-based access control for different administrative functions
  *      - Configurable exchange fees per token
  *      - Operational fee collection system
@@ -28,14 +31,8 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *      - Gasless exchange using permit
  *
  * @dev Exchange Formula:
- *      1. NLP → JPY (configurable rate using numerator/denominator)
- *      2. JPY → USD using JPY/USD price feed (external)
- *      3. USD → Target Token using token/USD price feed
- *      Formula: tokenAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
- *
- * @dev Price Data Sources:
- *      - Chainlink Oracle for KAIA/USDC/USDT (when available)
- *      - External JPY/USD data in Chainlink format (for Kaia environment)
+ *      For JPYC: tokenAmount = nlpAmount - exchangeFee - operationalFee (1:1 direct exchange)
+ *      For others: tokenAmount = (nlpAmount * nlpToJpyRate / denominator * jpyUsdPrice) / tokenUsdPrice - exchangeFee - operationalFee
  *
  * @dev Security Features:
  *      - Reentrancy protection
@@ -52,16 +49,17 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  *      - EMERGENCY_MANAGER_ROLE: Can pause/unpause and perform emergency withdrawals
  *      - FEE_MANAGER_ROLE: Can manage operational fees and withdrawal
  */
-contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable {
+contract NLPToMultiTokenPolExchange is AccessControl, ReentrancyGuard, Pausable {
     /* ═══════════════════════════════════════════════════════════════════════
                                    ENUMS
     ═══════════════════════════════════════════════════════════════════════ */
 
     /// @notice Supported token types for exchange
     enum TokenType {
-        KAIA,
+        MATIC,
         USDC,
-        USDT
+        USDT,
+        JPYC
     }
 
     /// @notice Exchange access control modes
@@ -74,7 +72,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
                                   STRUCTS
     ═══════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Round data structure migrating from chainlink to pyth network's latestRoundData
+    /// @notice Round data structure matching Chainlink's latestRoundData
     struct RoundData {
         uint80 roundId;
         int answer;
@@ -85,12 +83,13 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     /// @notice Token configuration
     struct TokenConfig {
-        address tokenAddress; // Token contract address (address(0) for KAIA)
-        PythAggregatorV3 priceFeed; // Pyth price feed (if available)
+        address tokenAddress; // Token contract address (address(0) for MATIC)
+        AggregatorV3Interface priceFeed; // Chainlink price feed (if available)
         uint8 decimals; // Token decimals
         uint exchangeFee; // Exchange fee in basis points (100 = 1%)
         bool isEnabled; // Whether exchanges are enabled for this token
-        bool hasOracle; // Whether Pyth oracle is available
+        bool hasOracle; // Whether Chainlink oracle is available
+        bool isDirectExchange; // Whether token uses 1:1 direct exchange (e.g., JPYC)
         string symbol; // Token symbol for events
     }
 
@@ -130,8 +129,17 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice NewLo Point token contract
     IERC20Extended public immutable nlpToken;
 
-    /// @notice Pyth Network contract address
-    address public immutable pythAddress;
+    /// @notice Chainlink MATIC/USD price feed (always required)
+    AggregatorV3Interface public immutable maticUsdPriceFeed;
+
+    /// @notice Chainlink JPY/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public jpyUsdPriceFeed;
+
+    /// @notice Chainlink USDC/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public usdcUsdPriceFeed;
+
+    /// @notice Chainlink USDT/USD price feed (updatable, address(0) if not available)
+    AggregatorV3Interface public usdtUsdPriceFeed;
 
     /// @notice External JPY/USD round data (used when jpyUsdPriceFeed is address(0))
     RoundData public jpyUsdExternalRoundData;
@@ -244,20 +252,14 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /// @notice Emitted when treasury address is updated
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
-    /// @notice Emitted when KAIA/USD oracle address is updated
-    event KAIAUSDOracleUpdated(
-        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
-    );
+    /// @notice Emitted when JPY/USD oracle address is updated
+    event JPYUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
 
     /// @notice Emitted when USDC/USD oracle address is updated
-    event USDCUSDOracleUpdated(
-        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
-    );
+    event USDCUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
 
     /// @notice Emitted when USDT/USD oracle address is updated
-    event USDTUSDOracleUpdated(
-        address indexed oldOracle, bytes32 oldPriceId, address indexed newOracle, bytes32 newPriceId
-    );
+    event USDTUSDOracleUpdated(address indexed oldOracle, address indexed newOracle);
 
     /// @notice Emitted when NLP to JPY exchange rate is updated
     event NLPToJPYRateUpdated(uint oldRate, uint newRate, address updatedBy);
@@ -274,13 +276,13 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     error InsufficientBalance(TokenType tokenType, uint required, uint available);
     error InvalidExchangeAmount(uint amount);
-    error InvalidUser(address user);
-    error PermitFailed(address user, uint nlpAmount, uint deadline);
     error PriceDataStale(uint updatedAt, uint threshold);
     error InvalidPriceData(int price);
     error ExchangeFailed(address user, uint nlpAmount);
     error InvalidExchangeFee(uint fee, uint maxFee);
     error InvalidOperationalFee(uint fee, uint maxFee);
+    error InvalidUser(address user);
+    error PermitFailed(address user, uint nlpAmount, uint deadline);
     error TokenNotEnabled(TokenType tokenType);
     error NoPriceDataAvailable(TokenType tokenType);
     error InvalidFeeRecipient(address recipient);
@@ -295,28 +297,48 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     error TreasuryNotSet();
     error InvalidTokenType(TokenType tokenType);
     error InvalidTokenConfig();
-    error SlippageToleranceExceeded(uint expectedAmount, uint actualAmount, uint minAmount);
     error NotWhitelisted(address user);
     error InvalidExchangeMode(ExchangeMode mode);
-    error InvalidPriceId(bytes32 priceId);
 
     /* ═══════════════════════════════════════════════════════════════════════
                                 CONSTRUCTOR
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Initialize the multi-token exchange contract
+     * @notice Initialize the multi-token exchange contract for Polygon
      * @param _nlpToken NewLo Point token contract address
-     * @param _pythAddress Pyth Network contract address
+     * @param _maticUsdPriceFeed Chainlink MATIC/USD price feed address (required)
+     * @param _jpyUsdPriceFeed Chainlink JPY/USD price feed address (address(0) if not available)
+     * @param _usdcUsdPriceFeed Chainlink USDC/USD price feed address (address(0) if not available)
+     * @param _usdtUsdPriceFeed Chainlink USDT/USD price feed address (address(0) if not available)
      * @param _initialAdmin Initial admin of the contract
      */
-    constructor(address _nlpToken, address _pythAddress, address _initialAdmin) {
+    constructor(
+        address _nlpToken,
+        address _maticUsdPriceFeed,
+        address _jpyUsdPriceFeed,
+        address _usdcUsdPriceFeed,
+        address _usdtUsdPriceFeed,
+        address _initialAdmin
+    ) {
         if (_nlpToken == address(0)) revert ZeroAddress();
-        if (_pythAddress == address(0)) revert ZeroAddress();
+        if (_maticUsdPriceFeed == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
 
         nlpToken = IERC20Extended(_nlpToken);
-        pythAddress = _pythAddress;
+        maticUsdPriceFeed = AggregatorV3Interface(_maticUsdPriceFeed);
+
+        if (_jpyUsdPriceFeed != address(0)) {
+            jpyUsdPriceFeed = AggregatorV3Interface(_jpyUsdPriceFeed);
+        }
+
+        if (_usdcUsdPriceFeed != address(0)) {
+            usdcUsdPriceFeed = AggregatorV3Interface(_usdcUsdPriceFeed);
+        }
+
+        if (_usdtUsdPriceFeed != address(0)) {
+            usdtUsdPriceFeed = AggregatorV3Interface(_usdtUsdPriceFeed);
+        }
 
         // Set up access control roles
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
@@ -334,60 +356,40 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     /**
      * @notice Configure a token for exchange
      * @param tokenType Token type to configure
-     * @param tokenAddress Token contract address (address(0) for KAIA)
-     * @param priceId Pyth price ID
+     * @param tokenAddress Token contract address (address(0) for MATIC)
+     * @param priceFeed Chainlink price feed address (address(0) if not available or for JPYC)
      * @param decimals Token decimals
      * @param exchangeFee Exchange fee in basis points
+     * @param isDirectExchange Whether token uses 1:1 direct exchange (true for JPYC)
      * @param symbol Token symbol
      */
     function configureToken(
         TokenType tokenType,
         address tokenAddress,
-        bytes32 priceId,
+        address priceFeed,
         uint8 decimals,
         uint exchangeFee,
+        bool isDirectExchange,
         string memory symbol
     ) external onlyRole(CONFIG_MANAGER_ROLE) {
         if (exchangeFee > maxFee) {
             revert InvalidExchangeFee(exchangeFee, maxFee);
         }
 
-        if (priceId == bytes32(0)) {
-            revert InvalidPriceId(priceId);
-        }
-
-        // Store old oracle information for events (if token was previously configured)
-        address oldOracle = address(0);
-        bytes32 oldPriceId = bytes32(0);
-        bool wasConfigured = tokenConfigs[tokenType].hasOracle;
-
-        if (wasConfigured) {
-            oldOracle = address(tokenConfigs[tokenType].priceFeed.pyth());
-            oldPriceId = tokenConfigs[tokenType].priceFeed.priceId();
-        }
-
         tokenConfigs[tokenType] = TokenConfig({
             tokenAddress: tokenAddress,
-            priceFeed: new PythAggregatorV3(pythAddress, priceId),
+            priceFeed: priceFeed != address(0)
+                ? AggregatorV3Interface(priceFeed)
+                : AggregatorV3Interface(address(0)),
             decimals: decimals,
             exchangeFee: exchangeFee,
             isEnabled: true,
-            hasOracle: true,
+            hasOracle: priceFeed != address(0),
+            isDirectExchange: isDirectExchange,
             symbol: symbol
         });
 
         emit TokenConfigUpdated(tokenType, tokenAddress, exchangeFee, true);
-
-        // Emit oracle-specific events for backward compatibility when updating existing tokens
-        if (wasConfigured) {
-            if (tokenType == TokenType.KAIA) {
-                emit KAIAUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
-            } else if (tokenType == TokenType.USDC) {
-                emit USDCUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
-            } else if (tokenType == TokenType.USDT) {
-                emit USDTUSDOracleUpdated(oldOracle, oldPriceId, pythAddress, priceId);
-            }
-        }
     }
 
     /**
@@ -486,7 +488,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
         emit OperationalFeeWithdrawn(tokenType, config.feeRecipient, withdrawAmount);
 
-        if (tokenType == TokenType.KAIA) {
+        if (tokenType == TokenType.MATIC) {
             (bool sent,) = config.feeRecipient.call{ value: withdrawAmount }("");
             if (!sent) revert TransferFailed();
         } else {
@@ -523,7 +525,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Update JPY/USD external data in latestRoundData format (recommended for Soneium)
+     * @notice Update JPY/USD external data in latestRoundData format
      * @param roundId Round ID
      * @param answer Price answer (8 decimals, like Chainlink format)
      * @param startedAt Round start timestamp
@@ -551,6 +553,63 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         });
 
         emit JPYUSDExternalPriceUpdated(uint(answer), updatedAt, msg.sender);
+    }
+
+    /**
+     * @notice Update JPY/USD oracle address (for future oracle support)
+     * @param newJpyUsdPriceFeed New JPY/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the JPY/USD oracle when it becomes available
+     */
+    function updateJPYUSDOracle(address newJpyUsdPriceFeed) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        address oldOracle = address(jpyUsdPriceFeed);
+
+        if (newJpyUsdPriceFeed != address(0)) {
+            jpyUsdPriceFeed = AggregatorV3Interface(newJpyUsdPriceFeed);
+        } else {
+            jpyUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit JPYUSDOracleUpdated(oldOracle, newJpyUsdPriceFeed);
+    }
+
+    /**
+     * @notice Update USDC/USD oracle address
+     * @param newUsdcUsdPriceFeed New USDC/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the USDC/USD oracle address
+     */
+    function updateUSDCUSDOracle(address newUsdcUsdPriceFeed)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address oldOracle = address(usdcUsdPriceFeed);
+
+        if (newUsdcUsdPriceFeed != address(0)) {
+            usdcUsdPriceFeed = AggregatorV3Interface(newUsdcUsdPriceFeed);
+        } else {
+            usdcUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit USDCUSDOracleUpdated(oldOracle, newUsdcUsdPriceFeed);
+    }
+
+    /**
+     * @notice Update USDT/USD oracle address
+     * @param newUsdtUsdPriceFeed New USDT/USD price feed address (address(0) to disable oracle)
+     * @dev This allows updating the USDT/USD oracle address
+     */
+    function updateUSDTUSDOracle(address newUsdtUsdPriceFeed)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address oldOracle = address(usdtUsdPriceFeed);
+
+        if (newUsdtUsdPriceFeed != address(0)) {
+            usdtUsdPriceFeed = AggregatorV3Interface(newUsdtUsdPriceFeed);
+        } else {
+            usdtUsdPriceFeed = AggregatorV3Interface(address(0));
+        }
+
+        emit USDTUSDOracleUpdated(oldOracle, newUsdtUsdPriceFeed);
     }
 
     /**
@@ -628,6 +687,14 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         view
         returns (PriceCalculationResult memory result)
     {
+        TokenConfig memory config = tokenConfigs[tokenType];
+
+        // For JPYC direct exchange, prices are not used (1:1)
+        if (config.isDirectExchange) {
+            result = PriceCalculationResult({ tokenUsdPrice: 1e18, jpyUsdPrice: 1e18 });
+            return result;
+        }
+
         // Get prices using internal functions
         uint tokenUsdPrice = _getTokenPrice(tokenType);
         uint jpyUsdPrice = _getJPYUSDPrice();
@@ -655,17 +722,26 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             uint netAmountInUSD
         )
     {
+        TokenConfig memory config = tokenConfigs[tokenType];
+
         // Load fee configurations
-        uint exchangeFeeRate = tokenConfigs[tokenType].exchangeFee;
+        uint exchangeFeeRate = config.exchangeFee;
         uint operationalFeeRate = operationalFeeConfigs[tokenType].isEnabled
             ? operationalFeeConfigs[tokenType].feeRate
             : 0;
 
-        // Calculate JPY amount
-        uint jpyAmount = Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
+        // For JPYC direct exchange (1:1), use nlpAmount directly as gross amount in "USD" equivalent
+        if (config.isDirectExchange) {
+            // JPYC is 1:1 with NLP, no conversion needed
+            // Treat nlpAmount as the base amount (18 decimals)
+            grossAmountInUSD = nlpAmount;
+        } else {
+            // Calculate JPY amount
+            uint jpyAmount = Math.mulDiv(nlpAmount, NLP_TO_JPY_RATE, NLP_TO_JPY_RATE_DENOMINATOR);
 
-        // Calculate gross USD amount
-        grossAmountInUSD = Math.mulDiv(jpyAmount, jpyUsdPrice, 1e18);
+            // Calculate gross USD amount
+            grossAmountInUSD = Math.mulDiv(jpyAmount, jpyUsdPrice, 1e18);
+        }
 
         // Calculate fees in USD terms
         exchangeFeeInUSD = (grossAmountInUSD * exchangeFeeRate) / 10000;
@@ -691,7 +767,16 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         uint exchangeFeeInUSD,
         uint operationalFeeInUSD
     ) internal view returns (TokenAmountResult memory result) {
-        uint8 tokenDecimals = tokenConfigs[tokenType].decimals;
+        TokenConfig memory config = tokenConfigs[tokenType];
+        uint8 tokenDecimals = config.decimals;
+
+        // For JPYC direct exchange, amounts are already in the correct unit (18 decimals)
+        if (config.isDirectExchange) {
+            result.tokenAmount = netAmountInUSD;
+            result.exchangeFee = exchangeFeeInUSD;
+            result.operationalFee = operationalFeeInUSD;
+            return result;
+        }
 
         if (tokenDecimals == 18) {
             // 18 decimals - direct calculation
@@ -738,7 +823,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @param requiredAmount Required token amount
      */
     function _checkContractBalance(TokenType tokenType, uint requiredAmount) internal view {
-        if (tokenType == TokenType.KAIA) {
+        if (tokenType == TokenType.MATIC) {
             if (address(this).balance < requiredAmount) {
                 revert InsufficientBalance(tokenType, requiredAmount, address(this).balance);
             }
@@ -795,27 +880,22 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @param nlpAmount Amount of NLP tokens to exchange
      * @param user User address
      * @param relayer Relayer address (address(0) for direct exchange)
-     * @param minAmountOut Minimum amount of tokens to receive
      */
-    function _executeExchange(
-        TokenType tokenType,
-        uint nlpAmount,
-        address user,
-        address relayer,
-        uint minAmountOut
-    ) internal {
+    function _executeExchange(TokenType tokenType, uint nlpAmount, address user, address relayer)
+        internal
+    {
         // Get prices and calculate amounts
-        uint tokenUsdPrice = _getTokenPrice(tokenType);
-        uint jpyUsdPrice = _getJPYUSDPrice();
+        uint tokenUsdPrice = 1e18; // Default for JPYC
+        uint jpyUsdPrice = 1e18; // Default for JPYC
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isDirectExchange) {
+            tokenUsdPrice = _getTokenPrice(tokenType);
+            jpyUsdPrice = _getJPYUSDPrice();
+        }
+
         TokenAmountResult memory amountResult =
             _calculateTokenAmounts(tokenType, nlpAmount, tokenUsdPrice, jpyUsdPrice);
-
-        // Slippage protection check
-        if (minAmountOut > 0 && amountResult.tokenAmount < minAmountOut) {
-            revert SlippageToleranceExceeded(
-                amountResult.tokenAmount, amountResult.tokenAmount, minAmountOut
-            );
-        }
 
         // Check contract balance
         _checkContractBalance(tokenType, amountResult.tokenAmount);
@@ -848,7 +928,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         }
 
         // Send tokens to user
-        if (tokenType == TokenType.KAIA) {
+        if (tokenType == TokenType.MATIC) {
             Address.sendValue(payable(user), tokenAmount);
         } else {
             address tokenAddress = tokenConfigs[tokenType].tokenAddress;
@@ -924,7 +1004,29 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Exchange NLP tokens using permit (legacy function without slippage protection)
+     * @notice Exchange NLP tokens for specified token
+     * @param tokenType Type of token to receive
+     * @param nlpAmount Amount of NLP tokens to exchange
+     * @dev For JPYC: 1:1 exchange (no slippage). For others: uses oracle prices
+     */
+    function exchangeNLP(TokenType tokenType, uint nlpAmount) external nonReentrant whenNotPaused {
+        if (nlpAmount == 0) {
+            revert InvalidExchangeAmount(nlpAmount);
+        }
+
+        TokenConfig memory config = tokenConfigs[tokenType];
+        if (!config.isEnabled) {
+            revert TokenNotEnabled(tokenType);
+        }
+
+        // Check exchange permission
+        _checkExchangePermission(msg.sender);
+
+        _executeExchange(tokenType, nlpAmount, msg.sender, address(0));
+    }
+
+    /**
+     * @notice Exchange NLP tokens using permit (gasless transaction)
      * @param tokenType Type of token to receive
      * @param nlpAmount Amount of NLP tokens to exchange
      * @param deadline Permit deadline
@@ -932,7 +1034,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @param r ECDSA signature parameter
      * @param s ECDSA signature parameter
      * @param user User address (token owner)
-     * @dev This function is kept for backward compatibility. Consider using exchangeNLPWithPermitAndSlippage for better protection.
+     * @dev Relayer can execute this on behalf of user. For JPYC: 1:1 exchange
      */
     function exchangeNLPWithPermit(
         TokenType tokenType,
@@ -968,7 +1070,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         }
 
         // Execute exchange
-        _executeExchange(tokenType, nlpAmount, user, msg.sender, 0);
+        _executeExchange(tokenType, nlpAmount, user, msg.sender);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -981,13 +1083,26 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @return price Token price in USD (18 decimals)
      */
     function _getTokenPrice(TokenType tokenType) internal view returns (uint price) {
+        // JPYC uses direct exchange, no price needed
         TokenConfig memory config = tokenConfigs[tokenType];
-
-        if (!config.hasOracle || address(config.priceFeed) == address(0)) {
-            revert NoPriceDataAvailable(tokenType);
+        if (config.isDirectExchange) {
+            return 1e18; // Return 1.0 for direct exchange
         }
 
-        return _getOraclePriceInternal(address(config.priceFeed));
+        // Efficient conditional logic to reduce gas
+        if (tokenType == TokenType.MATIC) {
+            return _getOraclePriceInternal(address(maticUsdPriceFeed));
+        } else if (tokenType == TokenType.USDC) {
+            if (address(usdcUsdPriceFeed) != address(0)) {
+                return _getOraclePriceInternal(address(usdcUsdPriceFeed));
+            }
+        } else if (tokenType == TokenType.USDT) {
+            if (address(usdtUsdPriceFeed) != address(0)) {
+                return _getOraclePriceInternal(address(usdtUsdPriceFeed));
+            }
+        }
+
+        revert NoPriceDataAvailable(tokenType);
     }
 
     /**
@@ -996,7 +1111,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @return price Price in 18 decimals
      */
     function _getOraclePriceInternal(address priceFeedAddress) internal view returns (uint price) {
-        PythAggregatorV3 feed = PythAggregatorV3(priceFeedAddress);
+        AggregatorV3Interface feed = AggregatorV3Interface(priceFeedAddress);
 
         (uint80 roundId, int priceInt, uint startedAt, uint updatedAt, uint80 answeredInRound) =
             feed.latestRoundData();
@@ -1029,6 +1144,15 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
      * @return price JPY/USD price (18 decimals)
      */
     function _getJPYUSDPrice() internal view returns (uint price) {
+        // Try oracle first if available
+        if (address(jpyUsdPriceFeed) != address(0)) {
+            try this.getOraclePrice(address(jpyUsdPriceFeed), 18) returns (uint oraclePrice) {
+                return oraclePrice;
+            } catch {
+                // Fall through to external data
+            }
+        }
+
         // Use external round data with efficient access
         RoundData storage externalRoundData = jpyUsdExternalRoundData;
         if (externalRoundData.updatedAt > 0 && externalRoundData.answer > 0) {
@@ -1038,7 +1162,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
             }
         }
 
-        revert NoPriceDataAvailable(TokenType.KAIA);
+        revert NoPriceDataAvailable(TokenType.MATIC);
     }
 
     /**
@@ -1052,7 +1176,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         view
         returns (uint price)
     {
-        PythAggregatorV3 feed = PythAggregatorV3(priceFeed);
+        AggregatorV3Interface feed = AggregatorV3Interface(priceFeed);
 
         (uint80 roundId, int priceInt, uint startedAt, uint updatedAt, uint80 answeredInRound) =
             feed.latestRoundData();
@@ -1143,16 +1267,16 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
 
     /**
      * @notice Get current contract status
-     * @return ethBalance Current ETH balance
+     * @return maticBalance Current MATIC balance
      * @return isPaused Whether contract is paused
      * @return jpyUsdPrice Current JPY/USD price
      */
     function getContractStatus()
         external
         view
-        returns (uint ethBalance, bool isPaused, uint jpyUsdPrice)
+        returns (uint maticBalance, bool isPaused, uint jpyUsdPrice)
     {
-        ethBalance = address(this).balance;
+        maticBalance = address(this).balance;
         isPaused = paused();
 
         try this.getLatestJPYPrice() returns (uint price) {
@@ -1206,16 +1330,12 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Get latest KAIA/USD price from dedicated oracle
-     * @return price KAIA/USD price (18 decimals)
-     * @dev This function always uses the configured KAIA/USD oracle
+     * @notice Get latest MATIC/USD price from dedicated oracle
+     * @return price MATIC/USD price (18 decimals)
+     * @dev This function always uses the dedicated MATIC/USD oracle
      */
-    function getLatestKAIAPrice() external view returns (uint price) {
-        TokenConfig memory config = tokenConfigs[TokenType.KAIA];
-        if (!config.hasOracle || address(config.priceFeed) == address(0)) {
-            revert NoPriceDataAvailable(TokenType.KAIA);
-        }
-        return this.getOraclePrice(address(config.priceFeed), 18);
+    function getLatestMATICPrice() external view returns (uint price) {
+        return this.getOraclePrice(address(maticUsdPriceFeed), 18);
     }
 
     /**
@@ -1272,10 +1392,10 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     }
 
     /**
-     * @notice Emergency withdrawal of ETH to treasury
+     * @notice Emergency withdrawal of MATIC to treasury
      * @param amount Amount to withdraw (0 for all)
      */
-    function emergencyWithdrawETH(uint amount)
+    function emergencyWithdrawMATIC(uint amount)
         external
         whenPaused
         nonReentrant
@@ -1287,10 +1407,10 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         uint withdrawAmount = amount == 0 ? balance : amount;
 
         if (withdrawAmount > balance) {
-            revert InsufficientBalance(TokenType.KAIA, withdrawAmount, balance);
+            revert InsufficientBalance(TokenType.MATIC, withdrawAmount, balance);
         }
 
-        emit EmergencyWithdraw(TokenType.KAIA, treasury, withdrawAmount);
+        emit EmergencyWithdraw(TokenType.MATIC, treasury, withdrawAmount);
         Address.sendValue(payable(treasury), withdrawAmount);
     }
 
@@ -1306,7 +1426,7 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
         onlyRole(EMERGENCY_MANAGER_ROLE)
     {
         if (treasury == address(0)) revert TreasuryNotSet();
-        if (tokenType == TokenType.KAIA) revert InvalidTokenType(tokenType);
+        if (tokenType == TokenType.MATIC) revert InvalidTokenType(tokenType);
 
         TokenConfig memory config = tokenConfigs[tokenType];
         if (config.tokenAddress == address(0)) revert InvalidTokenConfig();
@@ -1353,9 +1473,9 @@ contract NLPToMultiTokenKaiaExchange is AccessControl, ReentrancyGuard, Pausable
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Receive ETH deposits
+     * @notice Receive MATIC deposits
      */
     receive() external payable {
-        // Allow ETH deposits for exchange operations
+        // Allow MATIC deposits for exchange operations
     }
 }

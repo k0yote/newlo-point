@@ -5,8 +5,9 @@ import { Test } from "forge-std/Test.sol";
 import { console } from "forge-std/console.sol";
 import { NLPToMultiTokenExchange } from "../src/NLPToMultiTokenExchange.sol";
 import { IERC20Extended } from "../src/interfaces/IERC20Extended.sol";
-import { AggregatorV3Interface } from
-    "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { MockV3Aggregator } from "../src/mocks/MockV3Aggregator.sol";
 import { ERC20DecimalsWithMint } from "../src/tokens/ERC20DecimalsWithMint.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";

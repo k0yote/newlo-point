@@ -30,6 +30,7 @@ usage() {
     echo "  nlp-to-multi-token-kaia-exchange - NLPToMultiTokenKaiaExchange"
     echo "  pyth                      - IPyth"
     echo "  nlp-to-multi-token-kaia-exchange - NLPToMultiTokenKaiaExchange"
+    echo "  nlp-to-multi-token-kaia-exchange-v2 - NLPToMultiTokenKaiaExchangeV2"
     echo ""
     echo "Examples:"
     echo "  $0 newlo-point"
@@ -77,6 +78,10 @@ case "$1" in
     "nlp-to-multi-token-kaia-exchange")
         echo "Compiling NLPToMultiTokenKaiaExchange..."
         solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH $OPENZEPPELIN_INCLUDE src/NLPToMultiTokenKaiaExchange.sol $OUTPUT_DIR
+        ;;
+    "nlp-to-multi-token-kaia-exchange-v2")
+        echo "Compiling NLPToMultiTokenKaiaExchangeV2..."
+        solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH $OPENZEPPELIN_INCLUDE src/NLPToMultiTokenKaiaExchangeV2.sol $OUTPUT_DIR
         ;;
     "")
         echo "Error: No contract alias specified."

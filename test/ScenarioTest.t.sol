@@ -5,8 +5,9 @@ import { Test, console } from "forge-std/Test.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { TokenDistributionV2 } from "../src/TokenDistributionV2.sol";
 import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import { TransparentUpgradeableProxy } from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /**
  * @title ScenarioTest
