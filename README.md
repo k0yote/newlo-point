@@ -37,10 +37,22 @@ The NewLo Point (NLP) Contract System is a comprehensive DeFi protocol suite tha
 
 ### 4. 📊 MultiTokenDistribution.sol
 - **Function**: Batch distribution system for multiple tokens
-- **Features**: 
+- **Features**:
   - Efficient batch processing
   - Simultaneous distribution of multiple token types
   - Gas efficiency optimization
+
+### 5. 🌉 NLPToJPYCExchangeAdapter.sol ⭐ **Cross-Chain Bridge**
+- **Function**: Cross-chain escrow adapter for NLP (Soneium) to JPYC (Polygon) exchange
+- **Features**:
+  - **🌐 Cross-Chain Support**: Soneium ↔ Polygon bridge functionality
+  - **🔐 Backend-Controlled**: All operations executed by OPERATOR_ROLE
+  - **⚡ Gasless Transactions**: EIP-2612 permit-based approvals
+  - **💼 Escrow Management**: User-specific NLP escrow tracking
+  - **💰 Flexible Fee System**: Configurable exchange and operational fees
+  - **🛡️ Security First**: ReentrancyGuard, Pausable, AccessControl
+  - **📊 Transparent Operations**: Comprehensive event logging for off-chain tracking
+- **Documentation**: See [docs/NLPToJPYCExchangeAdapter.md](docs/NLPToJPYCExchangeAdapter.md)
 
 ## 🎭 Role-Based Access Control
 
@@ -49,10 +61,12 @@ The NewLo Point (NLP) Contract System is a comprehensive DeFi protocol suite tha
 | Role | Permissions | Purpose |
 |------|-------------|---------|
 | **DEFAULT_ADMIN_ROLE** | Full permissions | Super admin |
-| **CONFIG_MANAGER_ROLE** | Configuration management | Token settings, fee configuration |
+| **CONFIG_MANAGER_ROLE** / **CONFIG_ROLE** | Configuration management | Token settings, fee configuration |
 | **PRICE_UPDATER_ROLE** | Price updates | External price data updates |
 | **EMERGENCY_MANAGER_ROLE** | Emergency management | Emergency stops, fund withdrawals |
 | **FEE_MANAGER_ROLE** | Fee management | Operational fee configuration and withdrawals |
+| **OPERATOR_ROLE** | Backend operations | Execute escrow deposits, burns, and transfers (NLPToJPYCExchangeAdapter) |
+| **PAUSER_ROLE** | Pause control | Emergency pause functionality (NLPToJPYCExchangeAdapter) |
 
 ## 💰 Operational Fee System
 
