@@ -2,8 +2,9 @@
 pragma solidity ^0.8.27;
 
 import { Create2 } from "@openzeppelin/contracts/utils/Create2.sol";
-import { TransparentUpgradeableProxy } from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import { NewLoPoint } from "./NewLoPoint.sol";
 

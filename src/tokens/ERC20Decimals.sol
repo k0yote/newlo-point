@@ -34,9 +34,7 @@ contract ERC20Decimals is ERC20 {
      * @dev All parameters are immutable after deployment
      * @dev Decimals parameter overrides the default ERC20 decimals (18)
      */
-    constructor(string memory name_, string memory symbol_, uint8 decimals_)
-        ERC20(name_, symbol_)
-    {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         _decimals = decimals_;
     }
 

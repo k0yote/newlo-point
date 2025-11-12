@@ -4,8 +4,9 @@ pragma solidity ^0.8.27;
 import "forge-std/Test.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import { TransparentUpgradeableProxy } from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /**
  * @title NewLoPointTest

@@ -4,8 +4,9 @@ pragma solidity ^0.8.27;
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
-import { AggregatorV3Interface } from
-    "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
 
 /**
@@ -208,8 +209,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
         // Execute permit to allow this contract to spend user's tokens
         // This eliminates the need for user to call approve() separately
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
+        // Permit successful
+        }
+        catch {
             revert PermitFailed(user, nlpAmount, deadline);
         }
 
@@ -239,8 +241,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
 
         // Burn NLP tokens from user (using the permit approval)
         try nlpToken.burnFrom(user, nlpAmount) {
-            // Burn successful
-        } catch {
+        // Burn successful
+        }
+        catch {
             revert ExchangeFailed(user, nlpAmount);
         }
 
@@ -313,8 +316,9 @@ contract NLPToETHExchange is Ownable, ReentrancyGuard, Pausable {
 
         // Burn NLP tokens from user
         try nlpToken.burnFrom(user, nlpAmount) {
-            // Burn successful
-        } catch {
+        // Burn successful
+        }
+        catch {
             revert ExchangeFailed(user, nlpAmount);
         }
 

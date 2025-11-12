@@ -67,7 +67,6 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
     enum ExchangeMode {
         WHITELIST, // Only whitelisted addresses
         PUBLIC // Anyone can exchange (gas optimized default)
-
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -421,9 +420,7 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
         }
 
         operationalFeeConfigs[tokenType] = OperationalFeeConfig({
-            feeRate: feeRate,
-            feeRecipient: feeRecipient,
-            isEnabled: isEnabled
+            feeRate: feeRate, feeRecipient: feeRecipient, isEnabled: isEnabled
         });
 
         emit OperationalFeeConfigUpdated(tokenType, feeRate, feeRecipient, isEnabled);
@@ -901,8 +898,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
     {
         // Burn NLP tokens
         try nlpToken.burnFrom(user, nlpAmount) {
-            // Burn successful
-        } catch {
+        // Burn successful
+        }
+        catch {
             revert ExchangeFailed(user, nlpAmount);
         }
 
@@ -1068,8 +1066,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
+        // Permit successful
+        }
+        catch {
             revert PermitFailed(user, nlpAmount, deadline);
         }
 
@@ -1116,8 +1115,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
 
         // Execute permit
         try nlpToken.permit(user, address(this), nlpAmount, deadline, v, r, s) {
-            // Permit successful
-        } catch {
+        // Permit successful
+        }
+        catch {
             revert PermitFailed(user, nlpAmount, deadline);
         }
 
@@ -1207,7 +1207,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 tokenAmount = amountResult.tokenAmount;
                 tokenUsdRate = priceResult.tokenUsdPrice;
                 jpyUsdRate = priceResult.jpyUsdPrice;
@@ -1247,11 +1249,7 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
      * @param tokenType Token type to get config for
      * @return config Token configuration
      */
-    function getTokenConfig(TokenType tokenType)
-        external
-        view
-        returns (TokenConfig memory config)
-    {
+    function getTokenConfig(TokenType tokenType) external view returns (TokenConfig memory config) {
         config = tokenConfigs[tokenType];
     }
 
@@ -1401,7 +1399,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 quoteAmount = amountResult.tokenAmount;
                 // Calculate minimum amount considering slippage
                 minAmountOut = (quoteAmount * (10000 - slippageToleranceBps)) / 10000;
@@ -1452,7 +1452,9 @@ contract NLPToMultiTokenKaiaExchangeV2 is AccessControl, ReentrancyGuard, Pausab
         try this._calculatePrices(tokenType) returns (PriceCalculationResult memory priceResult) {
             try this._calculateTokenAmounts(
                 tokenType, nlpAmount, priceResult.tokenUsdPrice, priceResult.jpyUsdPrice
-            ) returns (TokenAmountResult memory amountResult) {
+            ) returns (
+                TokenAmountResult memory amountResult
+            ) {
                 tokenAmount = amountResult.tokenAmount;
                 tokenUsdRate = priceResult.tokenUsdPrice;
                 jpyUsdRate = priceResult.jpyUsdPrice;

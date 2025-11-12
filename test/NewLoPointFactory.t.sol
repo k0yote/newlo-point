@@ -5,8 +5,9 @@ import "forge-std/Test.sol";
 import { NewLoPointFactory } from "../src/NewLoPointFactory.sol";
 import { NewLoPoint } from "../src/NewLoPoint.sol";
 import { ProxyAdmin } from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import { TransparentUpgradeableProxy } from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /**
  * @title NewLoPointFactoryTest
