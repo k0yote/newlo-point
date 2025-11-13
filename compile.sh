@@ -83,6 +83,10 @@ case "$1" in
         echo "Compiling NLPToMultiTokenKaiaExchangeV2..."
         solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH $OPENZEPPELIN_INCLUDE src/NLPToMultiTokenKaiaExchangeV2.sol $OUTPUT_DIR
         ;;
+    "nlp-to-jpyc-exchange-adapter")
+        echo "Compiling NLPToJPYCExchangeAdapter..."
+        solc $OPTIMIZE $EVM_VERSION $OUTPUT_FORMAT $BASE_PATH $OPENZEPPELIN_INCLUDE src/NLPToJPYCExchangeAdapter.sol $OUTPUT_DIR
+        ;;
     "")
         echo "Error: No contract alias specified."
         echo ""

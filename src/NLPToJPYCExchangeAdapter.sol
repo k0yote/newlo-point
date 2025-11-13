@@ -455,7 +455,7 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @notice Get exchange quote for specified NLP amount
      * @param tokenType Token type (must be JPYC, only supported type in this adapter)
      * @param nlpAmount Amount of NLP tokens
-     * @return jpycAmount Net JPYC amount after fees (reference only for off-chain Polygon transfer)
+     * @return tokenAmount Net JPYC amount after fees (reference only for off-chain Polygon transfer)
      * @return rate Current NLP to JPYC rate numerator
      * @return denominator Rate denominator (always 100)
      * @return exchangeFee Exchange fee amount in JPYC
@@ -468,7 +468,7 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         external
         view
         returns (
-            uint jpycAmount,
+            uint tokenAmount,
             uint rate,
             uint denominator,
             uint exchangeFee,
@@ -492,7 +492,7 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         operationalFee = (grossJpycAmount * operationalFeeRate) / 10000;
 
         // Calculate net JPYC amount after fees
-        jpycAmount = grossJpycAmount - exchangeFee - operationalFee;
+        tokenAmount = grossJpycAmount - exchangeFee - operationalFee;
 
         rate = nlpToJpycRate;
         denominator = RATE_DENOMINATOR;
