@@ -24,7 +24,7 @@ import { IERC20Extended } from "./interfaces/IERC20Extended.sol";
  * @dev Cross-Chain Exchange Flow:
  *      Since JPYC exists on Polygon network and NLP exists on Soneium network:
  *      1. User signs permit (frontend) - only user action
- *      2. Backend executes depositNLPWithPermit on Soneium (escrow NLP)
+ *      2. Backend executes exchangeNLPWithPermit on Soneium (escrow NLP)
  *      3. Backend sends JPYC to user on Polygon network
  *      4a. SUCCESS: Backend burns escrowed NLP on Soneium
  *      4b. FAILURE: Backend refunds escrowed NLP to user on Soneium
@@ -218,7 +218,8 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
     ═══════════════════════════════════════════════════════════════════════ */
 
     /**
-     * @notice Deposit NLP tokens using permit (gasless transaction)
+     * @notice Exchange NLP tokens to JPYC using permit (gasless transaction)
+     * @param tokenType Token type (must be JPYC)
      * @param nlpAmount Amount of NLP tokens to deposit
      * @param deadline Permit deadline
      * @param v ECDSA signature parameter
@@ -228,7 +229,8 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
      * @dev Only callable by OPERATOR_ROLE (backend service)
      * @dev Allows gasless deposits via EIP-2612 permit
      */
-    function depositNLPWithPermit(
+    function exchangeNLPWithPermit(
+        TokenType tokenType,
         uint nlpAmount,
         uint deadline,
         uint8 v,
@@ -236,6 +238,9 @@ contract NLPToJPYCExchangeAdapter is AccessControl, ReentrancyGuard, Pausable {
         bytes32 s,
         address user
     ) external nonReentrant whenNotPaused onlyRole(OPERATOR_ROLE) {
+        // Validate token type (only JPYC is supported)
+        require(tokenType == TokenType.JPYC, "Only JPYC is supported");
+
         if (nlpAmount == 0) revert ZeroAmount();
         if (nlpAmount < minDepositAmount) revert BelowMinimumDeposit(nlpAmount, minDepositAmount);
         if (user == address(0)) revert ZeroAddress();

@@ -109,7 +109,7 @@
 
 ### アーキテクチャの明確化
 - バックエンド制御モデルの確立
-- `depositNLPWithPermit` に `onlyRole(OPERATOR_ROLE)` 追加
+- `exchangeNLPWithPermit` に `onlyRole(OPERATOR_ROLE)` 追加
 - フロントエンド: ユーザーのpermit署名のみ
 - バックエンド: すべての操作（deposit, burn, transfer）
 

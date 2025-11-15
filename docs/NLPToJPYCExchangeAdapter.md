@@ -25,7 +25,7 @@ NLPToJPYCExchangeAdapterは、Soneium上のNewLo Point (NLP) トークンとPoly
                         │
                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│         2. Backend Executes depositNLPWithPermit                │
+│         2. Backend Executes exchangeNLPWithPermit               │
 │              (Soneium - OPERATOR_ROLE)                          │
 │                    Escrow NLP                                   │
 └───────────────────────┬─────────────────────────────────────────┘
@@ -58,7 +58,7 @@ NLPToJPYCExchangeAdapter
 ├── ReentrancyGuard (リエントランシー攻撃防止)
 ├── Pausable (緊急停止機能)
 └── Core Functions
-    ├── depositNLPWithPermit (エスクロー預け入れ)
+    ├── exchangeNLPWithPermit (エスクロー預け入れ)
     ├── burnEscrowedNLP (エスクロー焼却)
     ├── transferEscrowedNLP (エスクロー返金・転送)
     └── Configuration (設定変更)
@@ -69,7 +69,8 @@ NLPToJPYCExchangeAdapter
 ### 1. エスクロー預け入れ (OPERATOR_ROLE専用)
 
 ```solidity
-function depositNLPWithPermit(
+function exchangeNLPWithPermit(
+    TokenType tokenType,
     uint nlpAmount,
     uint deadline,
     uint8 v,
@@ -81,9 +82,16 @@ function depositNLPWithPermit(
 
 **用途**: ユーザーのpermit署名を使用してNLPをエスクロー
 
+**パラメータ**:
+- `tokenType`: トークンタイプ (JPYCのみサポート)
+- `nlpAmount`: エスクローするNLP量
+- `deadline`: permit署名の有効期限
+- `v, r, s`: ECDSA署名パラメータ
+- `user`: ユーザーアドレス (トークン所有者)
+
 **フロー**:
 1. フロントエンドでユーザーがpermit署名を生成
-2. バックエンドがこの関数を呼び出し
+2. バックエンドがこの関数を呼び出し (tokenTypeはJPYCを指定)
 3. NLPがコントラクトにエスクロー
 
 ### 2. エスクロー焼却 (OPERATOR_ROLE専用)
@@ -310,7 +318,7 @@ forge test
 
 バックエンドは以下を実行する必要があります：
 1. ユーザーのpermit署名を受け取る
-2. Soneium上で`depositNLPWithPermit`を呼び出し
+2. Soneium上で`exchangeNLPWithPermit`を呼び出し (tokenTypeはJPYCを指定)
 3. Polygon上でJPYCを送金
 4. 成功時: Soneium上で`burnEscrowedNLP`を呼び出し
 5. 失敗時: Soneium上で`transferEscrowedNLP`を呼び出し（返金）
