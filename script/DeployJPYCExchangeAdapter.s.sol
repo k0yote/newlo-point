@@ -147,8 +147,8 @@ contract DeployJPYCExchangeAdapterLocal is Script {
         // Test deposit with permit (depositNLP function was removed, only permit version available)
         // console.log("Testing deposit functionality...");
         // uint depositAmount = 100e18;
-        // Note: Use depositNLPWithPermit instead of depositNLP
-        // console.log("Use depositNLPWithPermit for gasless deposits");
+        // Note: Use exchangeNLPWithPermit instead of depositNLP
+        // console.log("Use exchangeNLPWithPermit for gasless deposits");
 
         // Get escrow info (will be 0 until deposit is made)
         NLPToJPYCExchangeAdapter.UserEscrow memory escrow = adapter.getUserEscrow(deployer);
@@ -169,7 +169,7 @@ contract DeployJPYCExchangeAdapterLocal is Script {
         console.log("Min Deposit:", adapter.minDepositAmount() / 1e18, "NLP");
         console.log("========================================");
         console.log("Backend Operations (OPERATOR_ROLE required):");
-        console.log("Deposit (permit): adapter.depositNLPWithPermit(...)");
+        console.log("Deposit (permit): adapter.exchangeNLPWithPermit(tokenType, ...)");
         console.log("Burn Escrow: adapter.burnEscrowedNLP(user, amount, reason)");
         console.log("Transfer/Refund: adapter.transferEscrowedNLP(from, to, amount, reason)");
         console.log("========================================");

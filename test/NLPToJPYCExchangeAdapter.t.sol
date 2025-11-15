@@ -146,7 +146,9 @@ contract NLPToJPYCExchangeAdapterTest is Test {
     function _depositNLP(uint amount) internal {
         (uint8 v, bytes32 r, bytes32 s, uint deadline) = _createPermitSignature(amount);
         vm.prank(OPERATOR);
-        adapter.depositNLPWithPermit(amount, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, amount, deadline, v, r, s, testUser
+        );
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -208,7 +210,9 @@ contract NLPToJPYCExchangeAdapterTest is Test {
         );
 
         vm.prank(OPERATOR);
-        adapter.depositNLPWithPermit(depositAmount, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, depositAmount, deadline, v, r, s, testUser
+        );
 
         // Verify deposit
         assertEq(nlpToken.balanceOf(address(adapter)), depositAmount, "Adapter should receive NLP");
@@ -232,22 +236,36 @@ contract NLPToJPYCExchangeAdapterTest is Test {
         // Unauthorized user trying to execute
         vm.prank(UNAUTHORIZED);
         vm.expectRevert();
-        adapter.depositNLPWithPermit(DEFAULT_DEPOSIT, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, DEFAULT_DEPOSIT, deadline, v, r, s, testUser
+        );
     }
 
     function testRevert_DepositNLPWithPermit_ZeroAddress() public {
         vm.prank(OPERATOR);
         vm.expectRevert(NLPToJPYCExchangeAdapter.ZeroAddress.selector);
-        adapter.depositNLPWithPermit(
-            DEFAULT_DEPOSIT, block.timestamp + 1 hours, 0, bytes32(0), bytes32(0), address(0)
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC,
+            DEFAULT_DEPOSIT,
+            block.timestamp + 1 hours,
+            0,
+            bytes32(0),
+            bytes32(0),
+            address(0)
         );
     }
 
     function testRevert_DepositNLPWithPermit_ZeroAmount() public {
         vm.prank(OPERATOR);
         vm.expectRevert(NLPToJPYCExchangeAdapter.ZeroAmount.selector);
-        adapter.depositNLPWithPermit(
-            0, block.timestamp + 1 hours, 0, bytes32(0), bytes32(0), testUser
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC,
+            0,
+            block.timestamp + 1 hours,
+            0,
+            bytes32(0),
+            bytes32(0),
+            testUser
         );
     }
 
@@ -280,7 +298,9 @@ contract NLPToJPYCExchangeAdapterTest is Test {
                 NLPToJPYCExchangeAdapter.PermitFailed.selector, testUser, depositAmount, deadline
             )
         );
-        adapter.depositNLPWithPermit(depositAmount, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, depositAmount, deadline, v, r, s, testUser
+        );
     }
 
     function testRevert_DepositNLPWithPermit_BelowMinimum() public {
@@ -293,7 +313,9 @@ contract NLPToJPYCExchangeAdapterTest is Test {
                 NLPToJPYCExchangeAdapter.BelowMinimumDeposit.selector, depositAmount, 1e18
             )
         );
-        adapter.depositNLPWithPermit(depositAmount, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, depositAmount, deadline, v, r, s, testUser
+        );
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -637,7 +659,9 @@ contract NLPToJPYCExchangeAdapterTest is Test {
 
         vm.prank(OPERATOR);
         vm.expectRevert();
-        adapter.depositNLPWithPermit(DEFAULT_DEPOSIT, deadline, v, r, s, testUser);
+        adapter.exchangeNLPWithPermit(
+            NLPToJPYCExchangeAdapter.TokenType.JPYC, DEFAULT_DEPOSIT, deadline, v, r, s, testUser
+        );
     }
 
     function test_Unpause() public {
