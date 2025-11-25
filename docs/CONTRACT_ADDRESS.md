@@ -19,7 +19,7 @@
 | **MultiTokenDistribtion** | [`0x09e22F5CE9F550115D1C560343c36F2C0d1C7BeC`](https://soneium-minato.blockscout.com/address/0x09e22F5CE9F550115D1C560343c36F2C0d1C7BeC) | Multiple token distribution contract for NewLo ecosystem |
 | **NLPToMultiTokenExchange** | [`0x277bFeC2194B389Bb975035EB72D157f9eAa3887`](https://soneium-minato.blockscout.com/address/0x277bFeC2194B389Bb975035EB72D157f9eAa3887) | Exchange contract from NewLo Point (NLP) to multiple tokens (ETH, USDC, USDT) |
 | **SoneiumETHDistribution** | [`0x8897494ac5B05486c76919055f68904344d78f5e`](https://soneium-minato.blockscout.com/address/0x8897494ac5B05486c76919055f68904344d78f5e) | Ultra-efficient bulk ETH distribution contract for Soneium network |
-| **NLPToJPYCExchangeAdapter** | [`0xf1F5a4967ac84DAEf37F924b2fD90423A167746d`](https://soneium-minato.blockscout.com/address/0xf1F5a4967ac84DAEf37F924b2fD90423A167746d) | Cross-chain exchange adapter for NLP (Soneium) to JPYC (Polygon) conversion |
+| **NLPToJPYCExchangeAdapter** | [`0xE00aB945a9430671Da7d25E5C9214B98220c63D7`](https://soneium-minato.blockscout.com/address/0xE00aB945a9430671Da7d25E5C9214B98220c63D7) | Cross-chain exchange adapter for NLP (Soneium) to JPYC (Polygon) conversion |
 
 
 ### KAIA Mainnet
