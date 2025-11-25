@@ -41,3 +41,5 @@ README.md.bak
 simulate_exchange.py
 .mcp.json
 CLAUDE.md
+examples/
+src/fiat/
